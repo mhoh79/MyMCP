@@ -1,12 +1,13 @@
-# Fibonacci MCP Server
+# Mathematical Tools MCP Server
 
-A complete Model Context Protocol (MCP) server implementation in Python that provides Fibonacci calculation tools for AI assistants like Claude Desktop and other MCP-compatible clients.
+A complete Model Context Protocol (MCP) server implementation in Python that provides Fibonacci and prime number calculation tools for AI assistants like Claude Desktop and other MCP-compatible clients.
 
 ## 🌟 Features
 
-- **Dual Calculation Modes**: Calculate individual Fibonacci numbers or generate complete sequences
-- **High Performance**: Fast iterative algorithm with O(n) time complexity
-- **Robust Validation**: Comprehensive error handling and input validation (range: 0-1000)
+- **Fibonacci Calculations**: Calculate individual Fibonacci numbers or generate complete sequences
+- **Prime Number Tools**: Check primality, generate primes, find nth prime, and factorize numbers
+- **High Performance**: Optimized algorithms (Sieve of Eratosthenes, trial division with sqrt optimization)
+- **Robust Validation**: Comprehensive error handling and input validation with appropriate ranges
 - **Production Ready**: Full logging, proper error messages, and graceful shutdown
 - **Well Documented**: Extensive code annotations and inline documentation for learning
 - **Type Safe**: Complete type hints throughout the codebase
@@ -85,19 +86,24 @@ Completely quit Claude Desktop and restart it. The Fibonacci tool should now be 
 
 Once configured, you can interact with the server through Claude:
 
-### Calculate a Single Fibonacci Number
+### Fibonacci Calculations
 ```
 "What is the 50th Fibonacci number?"
 "Calculate the Fibonacci number at position 100"
-```
-
-### Generate Fibonacci Sequences
-```
 "Show me the first 20 Fibonacci numbers"
 "Generate a Fibonacci sequence with 15 numbers"
 ```
 
-## 🔧 Tool Specification
+### Prime Number Tools
+```
+"Is 97 a prime number?"
+"Show me all prime numbers up to 50"
+"What is the 100th prime number?"
+"What are the prime factors of 24?"
+"Find the prime factorization of 360"
+```
+
+## 🔧 Tool Specifications
 
 ### Tool: `calculate_fibonacci`
 
@@ -118,6 +124,74 @@ Once configured, you can interact with the server through Claude:
 - Invalid input types
 - Out of range values (< 0 or > 1000)
 - Negative numbers
+- Missing required parameters
+
+### Tool: `is_prime`
+
+**Parameters:**
+- `n` (integer, required): Number to check for primality (2-1000000)
+
+**Response Format:**
+- `"Yes, {n} is a prime number."` or `"No, {n} is not a prime number."`
+
+**Algorithm:** Trial division with optimization (checks up to √n)
+
+**Error Handling:**
+- Invalid input types
+- Out of range values (< 2 or > 1000000)
+- Missing required parameters
+
+### Tool: `generate_primes`
+
+**Parameters:**
+- `limit` (integer, required): Upper bound for prime generation (2-10000)
+
+**Response Format:**
+- List of all prime numbers from 2 to limit
+- Includes count of primes found
+
+**Algorithm:** Sieve of Eratosthenes (O(n log log n) time complexity)
+
+**Error Handling:**
+- Invalid input types
+- Out of range values (< 2 or > 10000)
+- Missing required parameters
+
+### Tool: `nth_prime`
+
+**Parameters:**
+- `n` (integer, required): Position of the desired prime (1-10000, 1-indexed)
+
+**Response Format:**
+- `"The {n}th prime number is: {result}"`
+
+**Examples:**
+- 1st prime = 2
+- 5th prime = 11
+- 10th prime = 29
+- 100th prime = 541
+
+**Algorithm:** Generates primes using Sieve of Eratosthenes with estimated upper bound
+
+**Error Handling:**
+- Invalid input types
+- Out of range values (< 1 or > 10000)
+- Missing required parameters
+
+### Tool: `prime_factorization`
+
+**Parameters:**
+- `n` (integer, required): Number to factorize (2-1000000)
+
+**Response Format:**
+- List of [prime, exponent] pairs
+- Example: `24 = 2³ × 3¹` returns `[[2, 3], [3, 1]]`
+
+**Algorithm:** Trial division checking divisors up to √n
+
+**Error Handling:**
+- Invalid input types
+- Out of range values (< 2 or > 1000000)
 - Missing required parameters
 
 ## 📁 Project Structure
@@ -154,16 +228,27 @@ This will:
 
 ### Manual Testing
 
-You can also test the Fibonacci calculations directly in Python:
+You can also test the calculations directly in Python:
 
 ```python
-from src.fibonacci_server.server import calculate_fibonacci, calculate_fibonacci_sequence
+from src.fibonacci_server.server import (
+    calculate_fibonacci, 
+    calculate_fibonacci_sequence,
+    is_prime,
+    generate_primes,
+    nth_prime,
+    prime_factorization
+)
 
-# Single number
+# Fibonacci calculations
 print(calculate_fibonacci(10))  # Output: 55
-
-# Sequence
 print(calculate_fibonacci_sequence(10))  # Output: [0, 1, 1, 2, 3, 5, 8, 13, 21, 34]
+
+# Prime number tools
+print(is_prime(97))  # Output: True
+print(generate_primes(50))  # Output: [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47]
+print(nth_prime(10))  # Output: 29
+print(prime_factorization(24))  # Output: [[2, 3], [3, 1]]
 ```
 
 ## 🏗️ Architecture
@@ -193,7 +278,7 @@ Server logs are written to stderr. When running via Claude Desktop, check:
 
 **Windows:** `%APPDATA%\Claude\logs\main.log`
 
-Look for messages containing "fibonacci" or "mcp" to see connection attempts and errors.
+Look for messages containing "fibonacci", "prime", or "mcp" to see connection attempts and errors.
 
 ### Common Issues
 
@@ -224,11 +309,12 @@ All dependencies are automatically installed via `pip install -r requirements.tx
 
 This is a learning project demonstrating MCP server implementation. Feel free to:
 
-- Add new mathematical tools (primes, factorials, etc.)
+- Add new mathematical tools (number theory, combinatorics, etc.)
 - Improve error handling
 - Add unit tests
 - Enhance documentation
 - Create additional example servers
+- Optimize algorithms
 
 ## 📖 Learning Resources
 
@@ -243,11 +329,20 @@ Your server is working correctly if you can:
 1. ✅ Start the server manually without errors
 2. ✅ See the server in Claude Desktop's tool list
 3. ✅ Ask Claude to calculate Fibonacci numbers and receive correct results
-4. ✅ Generate sequences and verify the mathematical correctness
+4. ✅ Use prime number tools and verify the mathematical correctness
 
-Example verification:
+Example verifications:
 - Request: "Calculate the first 10 Fibonacci numbers"
 - Expected: `[0, 1, 1, 2, 3, 5, 8, 13, 21, 34]`
+
+- Request: "Show me all prime numbers up to 50"
+- Expected: `[2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47]`
+
+- Request: "Is 97 a prime number?"
+- Expected: "Yes, 97 is a prime number."
+
+- Request: "What are the prime factors of 24?"
+- Expected: `[[2, 3], [3, 1]]` (2³ × 3¹)
 
 ## 📄 License
 
@@ -264,6 +359,8 @@ This project demonstrates:
 - Type-safe Python development
 - Virtual environment management
 - Integration with AI assistants
+- Algorithm implementation (Fibonacci, Sieve of Eratosthenes, trial division)
+- Mathematical computation and number theory
 
 ---
 
