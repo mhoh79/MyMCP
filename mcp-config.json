@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "fibonacci": {
+      "command": "c:\\Users\\matti\\OneDrive\\Github\\MyMCP\\venv\\Scripts\\python.exe",
+      "args": [
+        "c:\\Users\\matti\\OneDrive\\Github\\MyMCP\\src\\fibonacci_server\\server.py"
+      ]
+    }
+  }
+}
