@@ -1,12 +1,13 @@
 # Mathematical Tools MCP Server
 
-A complete Model Context Protocol (MCP) server implementation in Python that provides Fibonacci and prime number calculation tools for AI assistants like Claude Desktop and other MCP-compatible clients.
+A complete Model Context Protocol (MCP) server implementation in Python that provides mathematical calculation tools for AI assistants like Claude Desktop and other MCP-compatible clients.
 
 ## 🌟 Features
 
 - **Fibonacci Calculations**: Calculate individual Fibonacci numbers or generate complete sequences
 - **Prime Number Tools**: Check primality, generate primes, find nth prime, and factorize numbers
-- **High Performance**: Optimized algorithms (Sieve of Eratosthenes, trial division with sqrt optimization)
+- **Number Theory Tools**: GCD, LCM, factorial, combinations, and permutations
+- **High Performance**: Optimized algorithms (Euclidean algorithm, Sieve of Eratosthenes, efficient combinatorics)
 - **Robust Validation**: Comprehensive error handling and input validation with appropriate ranges
 - **Production Ready**: Full logging, proper error messages, and graceful shutdown
 - **Well Documented**: Extensive code annotations and inline documentation for learning
@@ -103,6 +104,15 @@ Once configured, you can interact with the server through Claude:
 "Find the prime factorization of 360"
 ```
 
+### Number Theory Tools
+```
+"What's the GCD of 48 and 18?"
+"Find the LCM of 12, 18, and 24"
+"Calculate 10 factorial"
+"How many ways can I choose 3 items from 10?"
+"How many ways can I arrange 3 items from 5?"
+```
+
 ## 🔧 Tool Specifications
 
 ### Tool: `calculate_fibonacci`
@@ -194,6 +204,99 @@ Once configured, you can interact with the server through Claude:
 - Out of range values (< 2 or > 1000000)
 - Missing required parameters
 
+### Tool: `gcd`
+
+**Parameters:**
+- `numbers` (array of integers, required): 2-10 numbers to find GCD of
+
+**Response Format:**
+- Single integer representing the GCD
+- Example: `GCD(48, 18) = 6`
+
+**Algorithm:** Euclidean algorithm applied pairwise
+
+**Error Handling:**
+- Invalid input types
+- Array length not between 2 and 10
+- Non-integer elements in array
+- Missing required parameters
+
+### Tool: `lcm`
+
+**Parameters:**
+- `numbers` (array of integers, required): 2-10 numbers to find LCM of
+
+**Response Format:**
+- Single integer representing the LCM
+- Example: `LCM(12, 18) = 36`
+
+**Algorithm:** Uses GCD to compute LCM(a,b) = (a × b) / GCD(a,b)
+
+**Error Handling:**
+- Invalid input types
+- Array length not between 2 and 10
+- Non-integer elements in array
+- Zero values in array (LCM undefined)
+- Missing required parameters
+
+### Tool: `factorial`
+
+**Parameters:**
+- `n` (integer, required): Number to calculate factorial of (0-170)
+
+**Response Format:**
+- Single integer representing n!
+- Example: `5! = 120`
+
+**Algorithm:** Iterative multiplication for efficiency
+
+**Error Handling:**
+- Invalid input types
+- Out of range values (< 0 or > 170)
+- Missing required parameters
+
+**Note:** Limited to 170 to avoid overflow issues
+
+### Tool: `combinations`
+
+**Parameters:**
+- `n` (integer, required): Total number of items (0-1000)
+- `r` (integer, required): Number of items to choose (0 to n)
+
+**Response Format:**
+- Single integer representing C(n,r)
+- Example: `C(5,2) = 10`
+
+**Formula:** C(n,r) = n! / (r! × (n-r)!)
+
+**Algorithm:** Uses multiplicative formula to avoid large factorials
+
+**Error Handling:**
+- Invalid input types
+- Out of range values (n < 0, n > 1000, r < 0)
+- r > n
+- Missing required parameters
+
+### Tool: `permutations`
+
+**Parameters:**
+- `n` (integer, required): Total number of items (0-1000)
+- `r` (integer, required): Number of items to arrange (0 to n)
+
+**Response Format:**
+- Single integer representing P(n,r)
+- Example: `P(5,2) = 20`
+
+**Formula:** P(n,r) = n! / (n-r)!
+
+**Algorithm:** Direct multiplication of consecutive integers
+
+**Error Handling:**
+- Invalid input types
+- Out of range values (n < 0, n > 1000, r < 0)
+- r > n
+- Missing required parameters
+
 ## 📁 Project Structure
 
 ```
@@ -237,7 +340,12 @@ from src.fibonacci_server.server import (
     is_prime,
     generate_primes,
     nth_prime,
-    prime_factorization
+    prime_factorization,
+    gcd,
+    lcm,
+    factorial,
+    combinations,
+    permutations
 )
 
 # Fibonacci calculations
@@ -249,6 +357,13 @@ print(is_prime(97))  # Output: True
 print(generate_primes(50))  # Output: [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47]
 print(nth_prime(10))  # Output: 29
 print(prime_factorization(24))  # Output: [[2, 3], [3, 1]]
+
+# Number theory tools
+print(gcd([48, 18]))  # Output: 6
+print(lcm([12, 18]))  # Output: 36
+print(factorial(5))  # Output: 120
+print(combinations(5, 2))  # Output: 10
+print(permutations(5, 2))  # Output: 20
 ```
 
 ## 🏗️ Architecture
@@ -330,6 +445,7 @@ Your server is working correctly if you can:
 2. ✅ See the server in Claude Desktop's tool list
 3. ✅ Ask Claude to calculate Fibonacci numbers and receive correct results
 4. ✅ Use prime number tools and verify the mathematical correctness
+5. ✅ Use number theory tools and verify the mathematical correctness
 
 Example verifications:
 - Request: "Calculate the first 10 Fibonacci numbers"
@@ -343,6 +459,21 @@ Example verifications:
 
 - Request: "What are the prime factors of 24?"
 - Expected: `[[2, 3], [3, 1]]` (2³ × 3¹)
+
+- Request: "What's the GCD of 48 and 18?"
+- Expected: `6`
+
+- Request: "Find the LCM of 12 and 18"
+- Expected: `36`
+
+- Request: "Calculate 5 factorial"
+- Expected: `120`
+
+- Request: "How many ways can I choose 3 items from 10?"
+- Expected: `120` (C(10,3))
+
+- Request: "How many ways can I arrange 2 items from 5?"
+- Expected: `20` (P(5,2))
 
 ## 📄 License
 
@@ -359,7 +490,11 @@ This project demonstrates:
 - Type-safe Python development
 - Virtual environment management
 - Integration with AI assistants
-- Algorithm implementation (Fibonacci, Sieve of Eratosthenes, trial division)
+- Algorithm implementation:
+  - Fibonacci sequence (iterative approach)
+  - Prime number algorithms (Sieve of Eratosthenes, trial division)
+  - Number theory algorithms (Euclidean algorithm for GCD)
+  - Combinatorics (efficient computation of combinations and permutations)
 - Mathematical computation and number theory
 
 ---
