@@ -10,6 +10,7 @@ A complete Model Context Protocol (MCP) server implementation in Python that pro
 - **Sequence Generators**: Pascal's triangle, triangular numbers, perfect numbers, and Collatz sequences
 - **Statistical Analysis**: Descriptive statistics, correlation analysis, percentile calculations, and outlier detection
 - **Cryptographic Hash Generator**: Generate MD5, SHA-1, SHA-256, SHA-512, and BLAKE2b hashes with security notes
+- **Unit Converter**: Convert between units across 7 categories (length, weight, temperature, volume, time, digital storage, speed) with precise factors
 - **High Performance**: Optimized algorithms (Euclidean algorithm, Sieve of Eratosthenes, efficient combinatorics, memoization)
 - **Robust Validation**: Comprehensive error handling and input validation with appropriate ranges
 - **Production Ready**: Full logging, proper error messages, and graceful shutdown
@@ -143,6 +144,17 @@ Once configured, you can interact with the server through Claude:
 "Find the 75th percentile of [10, 20, 30, 40, 50]"
 "Identify outliers in [10, 12, 14, 13, 15, 100, 11, 13, 14]"
 "Calculate mean and standard deviation for my dataset"
+```
+
+### Unit Converter
+```
+"Convert 100 kilometers to miles"
+"How many celsius is 75 fahrenheit?"
+"Convert 2 gigabytes to megabytes"
+"What is 5 feet in meters?"
+"Convert 1 gallon to liters"
+"How many seconds in 2 hours?"
+"Convert 60 miles per hour to kilometers per hour"
 ```
 
 ## 🔧 Tool Specifications
@@ -622,6 +634,80 @@ Once configured, you can interact with the server through Claude:
 - Empty dataset
 - Data size out of range
 
+### Tool: `unit_convert`
+
+**Parameters:**
+- `value` (number, required): The numeric value to convert
+- `from_unit` (string, required): Source unit (case-insensitive, accepts abbreviations)
+- `to_unit` (string, required): Target unit (case-insensitive, accepts abbreviations)
+
+**Response Format:**
+- Converted value with formatted result
+- Conversion formula (for temperature) or factor
+- Category information (length, weight, temperature, volume, time, storage, speed)
+
+**Supported Unit Categories:**
+
+**Length:**
+- Metric: millimeter (mm), centimeter (cm), meter (m), kilometer (km)
+- Imperial: inch (in), foot (ft), yard (yd), mile (mi)
+- Uses exact conversion factors (1 inch = 2.54 cm exactly)
+
+**Weight/Mass:**
+- Metric: milligram (mg), gram (g), kilogram (kg), tonne (t)
+- Imperial: ounce (oz), pound (lb), ton (US short ton)
+- Precise factors from international standards
+
+**Temperature:**
+- Celsius (C), Fahrenheit (F), Kelvin (K)
+- Uses conversion formulas, not factors
+- Displays the formula used (e.g., "C × 9/5 + 32")
+
+**Volume:**
+- Metric: milliliter (ml), liter (l), cubic meter (m3)
+- Imperial: fluid ounce (fl oz), cup, pint (pt), quart (qt), gallon (gal)
+- US liquid measures
+
+**Time:**
+- millisecond (ms), second (s), minute (min), hour (h)
+- day (d), week, year (365 days)
+
+**Digital Storage:**
+- bit, byte (B), kilobyte (KB), megabyte (MB), gigabyte (GB), terabyte (TB)
+- Uses binary (1024-based) not decimal (1000-based)
+- Standard computer storage convention
+
+**Speed:**
+- meters per second (m/s), kilometers per hour (km/h), miles per hour (mph)
+
+**Examples:**
+```
+100 km → 62.137 mi
+75°F → 23.89°C (Formula: (F - 32) × 5/9)
+2 GB → 2048 MB
+5 ft → 1.524 m
+1 gallon → 3.785 liters
+2 hours → 7200 seconds
+60 mph → 96.561 km/h
+```
+
+**Features:**
+- Case-insensitive unit names
+- Accepts both full names and abbreviations
+- Validates units are in the same category
+- Shows conversion formula for temperature
+- Shows conversion factor for other categories
+- Appropriate precision for results
+- Exact conversion factors (1 inch = 2.54 cm, 1 lb = 453.59237 g)
+
+**Algorithm:** O(1) - direct calculation using lookup tables and formulas
+
+**Error Handling:**
+- Unknown units with helpful message
+- Attempt to convert between different categories
+- Invalid parameter types
+- Missing required parameters
+
 ## 📁 Project Structure
 
 ```
@@ -679,7 +765,8 @@ from src.fibonacci_server.server import (
     descriptive_stats,
     correlation,
     percentile,
-    outliers
+    outliers,
+    unit_convert
 )
 
 # Fibonacci calculations
@@ -719,6 +806,12 @@ print(correlation([1, 2, 3, 4, 5], [2, 4, 6, 8, 10]))
 print(percentile([23, 45, 12, 67, 34, 89, 23, 56], 50))  # Output: 39.5 (median)
 print(outliers([10, 12, 14, 13, 15, 100, 11, 13, 14]))  
 # Output: {'outliers': [100], 'indices': [5], 'count': 1, 'q1': 12.0, 'q3': 14.0, 'iqr': 2.0, ...}
+
+# Unit converter
+print(unit_convert(100, "km", "mi"))  # Output: {'result': 62.137..., 'formatted': '100 km = 62.14 mi', ...}
+print(unit_convert(75, "F", "C"))  # Output: {'result': 23.89, 'formatted': '75°F = 23.89°C (Formula: (F - 32) × 5/9)', ...}
+print(unit_convert(2, "GB", "MB"))  # Output: {'result': 2048, 'formatted': '2 GB = 2048 MB', ...}
+print(unit_convert(1, "gallon", "liter"))  # Output: {'result': 3.785..., 'formatted': '1 gallon = 3.785 liter', ...}
 ```
 
 ## 🏗️ Architecture
@@ -860,6 +953,15 @@ Example verifications:
 
 - Request: "Identify outliers in [10, 12, 14, 13, 15, 100, 11, 13, 14]"
 - Expected: Outliers: [100], Count: 1
+
+- Request: "Convert 100 kilometers to miles"
+- Expected: `100 km = 62.14 mi`
+
+- Request: "How many celsius is 75 fahrenheit?"
+- Expected: `75°F = 23.89°C (Formula: (F - 32) × 5/9)`
+
+- Request: "Convert 2 gigabytes to megabytes"
+- Expected: `2 GB = 2048 MB`
 
 ## 📄 License
 
