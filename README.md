@@ -23,6 +23,13 @@ Dedicated statistical analysis tools:
 - **Correlation Analysis**: Pearson correlation coefficient and covariance between two datasets
 - **Percentile Calculations**: Calculate specific percentiles from datasets with linear interpolation
 - **Outlier Detection**: Identify outliers using IQR method with configurable threshold
+- **Time Series Analysis**: 6 comprehensive tools for process monitoring and predictive maintenance
+  - **Moving Average**: Simple, Exponential, and Weighted MA for smoothing sensor data
+  - **Trend Detection**: Linear regression for equipment degradation and efficiency analysis
+  - **Autocorrelation**: Identify cyclic patterns and batch process cycles
+  - **Change Point Detection**: Detect process upsets, modifications, and regime changes
+  - **Rate of Change**: Monitor acceleration/deceleration for safety and startup monitoring
+  - **Rolling Statistics**: Continuous windowed statistics for SCADA displays
 
 ## 🌟 Benefits of Split Architecture
 
@@ -180,6 +187,18 @@ Once configured, you can interact with the server through Claude:
 "Identify outliers in [10, 12, 14, 13, 15, 100, 11, 13, 14] using threshold 1.5"
 "Calculate mean and standard deviation for my dataset"
 ```
+
+### Time Series Analysis (Stats Server)
+```
+"Calculate a 5-period moving average to smooth this temperature data"
+"Analyze the trend in bearing temperature - is it increasing?"
+"Find cyclic patterns in these batch cycle times"
+"Detect when the process improvement took effect in production data"
+"Calculate the rate of temperature change during reactor startup"
+"Show rolling statistics with a 10-point window for process monitoring"
+```
+
+**For detailed time series documentation and industrial use cases, see [TIME_SERIES_TOOLS.md](TIME_SERIES_TOOLS.md)**
 
 ### Unit Converter
 ```
