@@ -263,7 +263,7 @@ def correlation(x: list[float], y: list[float]) -> dict[str, Any]:
     
     # Handle edge case: all values are the same (no variance)
     if sum_sq_x == 0 or sum_sq_y == 0:
-        raise ValueError("Cannot calculate correlation when all values in a dataset are identical (zero variance)")
+        raise ValueError("Cannot calculate correlation: data has zero variance")
     
     # Calculate Pearson correlation coefficient
     # r = covariance / (std_x × std_y)
@@ -722,6 +722,13 @@ def detect_trend(data: list[float], timestamps: list[float] = None, method: str 
     x = timestamps
     y = data
     
+    # Handle polynomial method (not fully implemented, fall back to linear)
+    if method == "polynomial":
+        # Log a warning and use linear instead
+        import logging
+        logging.warning(f"Polynomial regression not implemented, using linear regression instead")
+        method = "linear"
+    
     if method == "linear":
         # Linear regression: y = mx + b
         # Using least squares method
@@ -766,7 +773,11 @@ def detect_trend(data: list[float], timestamps: list[float] = None, method: str 
         
         # Calculate confidence interval (simplified)
         # Standard error of slope
-        se_slope = (ss_res / (n - 2)) ** 0.5 / (sum_xx - sum_x ** 2 / n) ** 0.5 if n > 2 else 0
+        variance_x = sum_xx - sum_x ** 2 / n
+        if n > 2 and variance_x > 1e-10:
+            se_slope = (ss_res / (n - 2)) ** 0.5 / (variance_x ** 0.5)
+        else:
+            se_slope = 0
         # 95% CI: approximately ±2 * SE (using t ≈ 2 for simplicity)
         ci_margin = 2 * se_slope
         confidence_interval = [slope - ci_margin, slope + ci_margin]
@@ -774,22 +785,6 @@ def detect_trend(data: list[float], timestamps: list[float] = None, method: str 
         # Predict next 5 values
         last_x = x[-1]
         prediction_next_5 = [slope * (last_x + i + 1) + intercept for i in range(5)]
-        
-    else:  # polynomial
-        # Polynomial regression using normal equations
-        # This is a simplified implementation
-        # For production use, consider using numpy.polyfit
-        
-        # Build Vandermonde matrix for polynomial fitting
-        # For degree d, we solve: [1, x, x^2, ..., x^d] * coeffs = y
-        # Using simplified approach for small degrees
-        
-        # For now, fall back to linear for polynomial (simplified)
-        # A full polynomial implementation would require matrix operations
-        # which we're avoiding to minimize dependencies
-        
-        # Simplified: use linear regression and note polynomial was requested
-        return detect_trend(data, timestamps, "linear", degree)
     
     # Determine fit quality
     if r_squared >= 0.9:
@@ -1017,8 +1012,9 @@ def change_point_detection(data: list[float], method: str = "cusum", threshold: 
                 std_after = (sum((x - mean_after) ** 2 for x in after) / len(after)) ** 0.5
                 
                 # Check for significant change in mean or std
-                if std_before > 0 and std_after > 0:
-                    mean_change = abs(mean_after - mean_before) / ((std_before + std_after) / 2)
+                avg_std = (std_before + std_after) / 2
+                if std_before > 1e-10 and std_after > 1e-10 and avg_std > 1e-10:
+                    mean_change = abs(mean_after - mean_before) / avg_std
                     std_ratio = max(std_after / std_before, std_before / std_after)
                     
                     if mean_change > threshold or std_ratio > (1 + threshold):
@@ -1077,9 +1073,10 @@ def change_point_detection(data: list[float], method: str = "cusum", threshold: 
             if magnitude > max_magnitude:
                 max_magnitude = magnitude
                 max_idx = change_points[i]
+                max_seg_idx = i
         
         if max_magnitude > 0:
-            direction = "increase" if segments[1]['mean'] > segments[0]['mean'] else "decrease"
+            direction = "increase" if segments[max_seg_idx + 1]['mean'] > segments[max_seg_idx]['mean'] else "decrease"
             largest_change = {
                 'index': max_idx,
                 'magnitude': max_magnitude,
