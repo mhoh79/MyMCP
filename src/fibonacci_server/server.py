@@ -331,6 +331,328 @@ def prime_factorization(n: int) -> list[list[int]]:
     return factors
 
 
+# ============================================================================
+# Number Theory Functions
+# ============================================================================
+
+
+def gcd(numbers: list[int]) -> int:
+    """
+    Calculate the greatest common divisor (GCD) of two or more numbers.
+    
+    Uses the Euclidean algorithm iteratively to find the GCD of multiple numbers.
+    The GCD is the largest positive integer that divides all the given numbers
+    without a remainder.
+    
+    Args:
+        numbers: List of integers (2-10 numbers) to find GCD of
+        
+    Returns:
+        The greatest common divisor of all numbers
+        
+    Raises:
+        ValueError: If fewer than 2 or more than 10 numbers provided
+        
+    Examples:
+        gcd([48, 18]) = 6          # 48 = 6×8, 18 = 6×3
+        gcd([12, 18, 24]) = 6      # Common divisor is 6
+        gcd([17, 19]) = 1          # Coprime numbers
+        gcd([100, 50, 25]) = 25    # All divisible by 25
+        
+    Algorithm Explanation (Euclidean Algorithm):
+        1. For two numbers a and b (a >= b):
+           - If b = 0, then GCD(a, b) = a
+           - Otherwise, GCD(a, b) = GCD(b, a mod b)
+        2. For multiple numbers, apply the algorithm pairwise:
+           - GCD(a, b, c) = GCD(GCD(a, b), c)
+        3. Continue until all numbers are processed
+        
+    Time Complexity: O(n log m) where n is the count and m is the largest number
+    """
+    if len(numbers) < 2 or len(numbers) > 10:
+        raise ValueError("GCD requires between 2 and 10 numbers")
+    
+    # Helper function to compute GCD of two numbers using Euclidean algorithm
+    def gcd_two(a: int, b: int) -> int:
+        """Compute GCD of two numbers using Euclidean algorithm."""
+        # Convert to absolute values to handle negative numbers
+        a, b = abs(a), abs(b)
+        
+        # Euclidean algorithm: repeatedly replace (a, b) with (b, a mod b)
+        while b != 0:
+            a, b = b, a % b
+        
+        return a
+    
+    # Start with the first number and apply GCD pairwise
+    result = numbers[0]
+    for num in numbers[1:]:
+        result = gcd_two(result, num)
+        # Early termination: if GCD becomes 1, it won't change further
+        if result == 1:
+            break
+    
+    return result
+
+
+def lcm(numbers: list[int]) -> int:
+    """
+    Calculate the least common multiple (LCM) of two or more numbers.
+    
+    The LCM is the smallest positive integer that is divisible by all the
+    given numbers. Uses the relationship: LCM(a,b) = (a × b) / GCD(a,b)
+    
+    Args:
+        numbers: List of integers (2-10 numbers) to find LCM of
+        
+    Returns:
+        The least common multiple of all numbers
+        
+    Raises:
+        ValueError: If fewer than 2 or more than 10 numbers provided
+        ValueError: If any number is zero (LCM undefined for zero)
+        
+    Examples:
+        lcm([12, 18]) = 36         # 12 = 2²×3, 18 = 2×3², LCM = 2²×3² = 36
+        lcm([4, 6, 8]) = 24        # Smallest number divisible by 4, 6, and 8
+        lcm([5, 7]) = 35           # For coprime numbers, LCM = product
+        lcm([10, 15, 20]) = 60     # Common multiple is 60
+        
+    Algorithm Explanation:
+        1. For two numbers a and b:
+           - LCM(a, b) = |a × b| / GCD(a, b)
+        2. For multiple numbers, apply the formula pairwise:
+           - LCM(a, b, c) = LCM(LCM(a, b), c)
+        3. Continue until all numbers are processed
+        
+    Note: Results can grow very large, so overflow protection is important
+    """
+    if len(numbers) < 2 or len(numbers) > 10:
+        raise ValueError("LCM requires between 2 and 10 numbers")
+    
+    # Check for zero in the list (LCM with 0 is undefined)
+    if 0 in numbers:
+        raise ValueError("LCM is undefined when any number is zero")
+    
+    # Helper function to compute LCM of two numbers
+    def lcm_two(a: int, b: int) -> int:
+        """Compute LCM of two numbers using GCD."""
+        # Convert to absolute values
+        a, b = abs(a), abs(b)
+        
+        # LCM(a, b) = (a * b) / GCD(a, b)
+        # We compute GCD first to avoid overflow
+        from math import gcd as math_gcd
+        return (a * b) // math_gcd(a, b)
+    
+    # Start with the first number and apply LCM pairwise
+    result = abs(numbers[0])
+    for num in numbers[1:]:
+        result = lcm_two(result, num)
+    
+    return result
+
+
+def factorial(n: int) -> int:
+    """
+    Calculate the factorial of a number (n!).
+    
+    The factorial of a non-negative integer n is the product of all positive
+    integers less than or equal to n. By definition, 0! = 1.
+    
+    Args:
+        n: The number to calculate factorial of (0-170)
+        
+    Returns:
+        The factorial of n (n!)
+        
+    Raises:
+        ValueError: If n is negative or greater than 170
+        
+    Examples:
+        factorial(0) = 1           # By definition
+        factorial(1) = 1           # 1
+        factorial(5) = 120         # 5 × 4 × 3 × 2 × 1
+        factorial(10) = 3628800    # 10!
+        
+    Algorithm Explanation:
+        1. Base case: 0! = 1 and 1! = 1
+        2. For n > 1: n! = n × (n-1) × (n-2) × ... × 2 × 1
+        3. Iterative approach is used for efficiency
+        
+    Note: Limited to 170 because 171! exceeds Python's float representation
+    and causes overflow issues in many contexts. For exact integer computation,
+    Python can handle larger values, but we enforce this limit for safety.
+    
+    Time Complexity: O(n)
+    Space Complexity: O(1)
+    """
+    if n < 0:
+        raise ValueError("Factorial is not defined for negative numbers")
+    
+    if n > 170:
+        raise ValueError("Factorial is limited to n <= 170 to avoid overflow")
+    
+    # Base cases: 0! = 1, 1! = 1
+    if n <= 1:
+        return 1
+    
+    # Iterative calculation for efficiency
+    result = 1
+    for i in range(2, n + 1):
+        result *= i
+    
+    return result
+
+
+# Memoization cache for factorial to improve performance
+_factorial_cache: dict[int, int] = {0: 1, 1: 1}
+
+
+def factorial_memoized(n: int) -> int:
+    """
+    Calculate factorial with memoization for better performance in repeated calls.
+    
+    This is used internally by combinations and permutations functions to avoid
+    redundant factorial calculations.
+    
+    Args:
+        n: The number to calculate factorial of (0-170)
+        
+    Returns:
+        The factorial of n (n!)
+    """
+    if n in _factorial_cache:
+        return _factorial_cache[n]
+    
+    if n < 0:
+        raise ValueError("Factorial is not defined for negative numbers")
+    
+    if n > 170:
+        raise ValueError("Factorial is limited to n <= 170 to avoid overflow")
+    
+    # Calculate and cache
+    result = n * factorial_memoized(n - 1)
+    _factorial_cache[n] = result
+    
+    return result
+
+
+def combinations(n: int, r: int) -> int:
+    """
+    Calculate combinations (nCr) - ways to choose r items from n items.
+    
+    Combinations represent the number of ways to select r items from n items
+    where order does not matter. Also written as C(n,r) or "n choose r".
+    
+    Args:
+        n: Total number of items (0-1000)
+        r: Number of items to choose (0 to n)
+        
+    Returns:
+        The number of combinations C(n,r) = n! / (r! × (n-r)!)
+        
+    Raises:
+        ValueError: If n or r are negative, r > n, or n > 1000
+        
+    Examples:
+        combinations(5, 2) = 10    # Choose 2 from 5: {1,2}, {1,3}, {1,4}, {1,5}, {2,3}, {2,4}, {2,5}, {3,4}, {3,5}, {4,5}
+        combinations(10, 3) = 120  # Choose 3 from 10
+        combinations(52, 5) = 2,598,960  # Poker hands (5 cards from 52)
+        combinations(5, 0) = 1     # One way to choose nothing
+        combinations(5, 5) = 1     # One way to choose everything
+        
+    Formula: C(n,r) = n! / (r! × (n-r)!)
+    
+    Algorithm Explanation:
+        1. Use the multiplicative formula to avoid computing large factorials:
+           C(n,r) = n × (n-1) × ... × (n-r+1) / (r × (r-1) × ... × 1)
+        2. This is more efficient and avoids overflow for large n
+        3. Optimization: C(n,r) = C(n, n-r), so use the smaller value
+        
+    Time Complexity: O(min(r, n-r))
+    Space Complexity: O(1)
+    """
+    if n < 0 or r < 0:
+        raise ValueError("n and r must be non-negative")
+    
+    if r > n:
+        raise ValueError("r cannot be greater than n")
+    
+    if n > 1000:
+        raise ValueError("n is limited to 1000 to prevent overflow")
+    
+    # Base cases
+    if r == 0 or r == n:
+        return 1
+    
+    # Optimization: C(n,r) = C(n, n-r), so calculate with smaller r
+    r = min(r, n - r)
+    
+    # Use multiplicative formula: C(n,r) = n! / (r! * (n-r)!)
+    # But calculate as: (n * (n-1) * ... * (n-r+1)) / (r * (r-1) * ... * 1)
+    # This avoids computing large factorials
+    result = 1
+    for i in range(r):
+        result = result * (n - i) // (i + 1)
+    
+    return result
+
+
+def permutations(n: int, r: int) -> int:
+    """
+    Calculate permutations (nPr) - ordered ways to choose r items from n items.
+    
+    Permutations represent the number of ways to select and arrange r items
+    from n items where order matters. Also written as P(n,r) or "n permute r".
+    
+    Args:
+        n: Total number of items (0-1000)
+        r: Number of items to arrange (0 to n)
+        
+    Returns:
+        The number of permutations P(n,r) = n! / (n-r)!
+        
+    Raises:
+        ValueError: If n or r are negative, r > n, or n > 1000
+        
+    Examples:
+        permutations(5, 2) = 20    # Arrange 2 from 5: 5 choices for 1st, 4 for 2nd
+        permutations(10, 3) = 720  # Arrange 3 from 10
+        permutations(5, 5) = 120   # All arrangements of 5 items = 5!
+        permutations(5, 0) = 1     # One way to arrange nothing
+        
+    Formula: P(n,r) = n! / (n-r)!
+    
+    Algorithm Explanation:
+        1. P(n,r) = n × (n-1) × (n-2) × ... × (n-r+1)
+        2. This is equivalent to n! / (n-r)! but more efficient
+        3. Multiply r consecutive descending integers starting from n
+        
+    Time Complexity: O(r)
+    Space Complexity: O(1)
+    """
+    if n < 0 or r < 0:
+        raise ValueError("n and r must be non-negative")
+    
+    if r > n:
+        raise ValueError("r cannot be greater than n")
+    
+    if n > 1000:
+        raise ValueError("n is limited to 1000 to prevent overflow")
+    
+    # Base case
+    if r == 0:
+        return 1
+    
+    # Calculate P(n,r) = n × (n-1) × (n-2) × ... × (n-r+1)
+    result = 1
+    for i in range(n, n - r, -1):
+        result *= i
+    
+    return result
+
+
 # Initialize the MCP server with a descriptive name
 app = Server("fibonacci-calculator")
 
@@ -454,6 +776,126 @@ async def list_tools() -> list[Tool]:
                 "required": ["n"],
             },
         ),
+        Tool(
+            name="gcd",
+            description=(
+                "Calculate the greatest common divisor (GCD) of two or more numbers using the Euclidean algorithm. "
+                "The GCD is the largest positive integer that divides all given numbers without a remainder. "
+                "For example, GCD(48, 18) = 6."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "numbers": {
+                        "type": "array",
+                        "description": "Array of integers to find GCD of",
+                        "items": {
+                            "type": "integer"
+                        },
+                        "minItems": 2,
+                        "maxItems": 10,
+                    },
+                },
+                "required": ["numbers"],
+            },
+        ),
+        Tool(
+            name="lcm",
+            description=(
+                "Calculate the least common multiple (LCM) of two or more numbers. "
+                "The LCM is the smallest positive integer divisible by all given numbers. "
+                "Uses the formula LCM(a,b) = (a × b) / GCD(a,b). "
+                "For example, LCM(12, 18) = 36."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "numbers": {
+                        "type": "array",
+                        "description": "Array of integers to find LCM of",
+                        "items": {
+                            "type": "integer"
+                        },
+                        "minItems": 2,
+                        "maxItems": 10,
+                    },
+                },
+                "required": ["numbers"],
+            },
+        ),
+        Tool(
+            name="factorial",
+            description=(
+                "Calculate the factorial of a number (n!). "
+                "The factorial is the product of all positive integers less than or equal to n. "
+                "By definition, 0! = 1. Limited to n ≤ 170 to avoid overflow. "
+                "For example, factorial(5) = 120."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "n": {
+                        "type": "integer",
+                        "description": "The number to calculate factorial of",
+                        "minimum": 0,
+                        "maximum": 170,
+                    },
+                },
+                "required": ["n"],
+            },
+        ),
+        Tool(
+            name="combinations",
+            description=(
+                "Calculate combinations (nCr) - the number of ways to choose r items from n items "
+                "where order does not matter. Also written as 'n choose r' or C(n,r). "
+                "Formula: C(n,r) = n! / (r! × (n-r)!). "
+                "For example, C(5,2) = 10."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "n": {
+                        "type": "integer",
+                        "description": "Total number of items",
+                        "minimum": 0,
+                        "maximum": 1000,
+                    },
+                    "r": {
+                        "type": "integer",
+                        "description": "Number of items to choose (must be ≤ n)",
+                        "minimum": 0,
+                    },
+                },
+                "required": ["n", "r"],
+            },
+        ),
+        Tool(
+            name="permutations",
+            description=(
+                "Calculate permutations (nPr) - the number of ordered ways to choose r items from n items "
+                "where order matters. Also written as 'n permute r' or P(n,r). "
+                "Formula: P(n,r) = n! / (n-r)!. "
+                "For example, P(5,2) = 20."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "n": {
+                        "type": "integer",
+                        "description": "Total number of items",
+                        "minimum": 0,
+                        "maximum": 1000,
+                    },
+                    "r": {
+                        "type": "integer",
+                        "description": "Number of items to arrange (must be ≤ n)",
+                        "minimum": 0,
+                    },
+                },
+                "required": ["n", "r"],
+            },
+        ),
     ]
 
 
@@ -487,6 +929,16 @@ async def call_tool(name: str, arguments: Any) -> CallToolResult:
             return await handle_nth_prime(arguments)
         elif name == "prime_factorization":
             return await handle_prime_factorization(arguments)
+        elif name == "gcd":
+            return await handle_gcd(arguments)
+        elif name == "lcm":
+            return await handle_lcm(arguments)
+        elif name == "factorial":
+            return await handle_factorial(arguments)
+        elif name == "combinations":
+            return await handle_combinations(arguments)
+        elif name == "permutations":
+            return await handle_permutations(arguments)
         else:
             logger.error(f"Unknown tool requested: {name}")
             return CallToolResult(
@@ -787,6 +1239,395 @@ async def handle_prime_factorization(arguments: Any) -> CallToolResult:
         )
     
     logger.info(f"Prime factorization of {n}: {factors}")
+    
+    return CallToolResult(
+        content=[TextContent(type="text", text=result_text)],
+        isError=False,
+    )
+
+
+async def handle_gcd(arguments: Any) -> CallToolResult:
+    """Handle gcd tool calls."""
+    # Extract and validate parameters
+    numbers = arguments.get("numbers")
+    
+    # Validate required parameter
+    if numbers is None:
+        logger.error("Missing required parameter: numbers")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text="Missing required parameter 'numbers'"
+            )],
+            isError=True,
+        )
+    
+    # Validate parameter type
+    if not isinstance(numbers, list):
+        logger.error(f"Invalid parameter type for numbers: {type(numbers)}")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=f"Parameter 'numbers' must be an array, got {type(numbers).__name__}"
+            )],
+            isError=True,
+        )
+    
+    # Validate array length
+    if len(numbers) < 2 or len(numbers) > 10:
+        logger.error(f"Invalid number count: {len(numbers)}")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text="Parameter 'numbers' must contain between 2 and 10 integers"
+            )],
+            isError=True,
+        )
+    
+    # Validate all elements are integers
+    if not all(isinstance(n, int) for n in numbers):
+        logger.error("Not all elements in numbers are integers")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text="All elements in 'numbers' must be integers"
+            )],
+            isError=True,
+        )
+    
+    # Calculate GCD
+    logger.info(f"Calculating GCD of {numbers}")
+    result = gcd(numbers)
+    
+    result_text = (
+        f"Greatest Common Divisor (GCD) of {numbers}:\n"
+        f"GCD = {result}"
+    )
+    
+    logger.info(f"GCD of {numbers} = {result}")
+    
+    return CallToolResult(
+        content=[TextContent(type="text", text=result_text)],
+        isError=False,
+    )
+
+
+async def handle_lcm(arguments: Any) -> CallToolResult:
+    """Handle lcm tool calls."""
+    # Extract and validate parameters
+    numbers = arguments.get("numbers")
+    
+    # Validate required parameter
+    if numbers is None:
+        logger.error("Missing required parameter: numbers")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text="Missing required parameter 'numbers'"
+            )],
+            isError=True,
+        )
+    
+    # Validate parameter type
+    if not isinstance(numbers, list):
+        logger.error(f"Invalid parameter type for numbers: {type(numbers)}")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=f"Parameter 'numbers' must be an array, got {type(numbers).__name__}"
+            )],
+            isError=True,
+        )
+    
+    # Validate array length
+    if len(numbers) < 2 or len(numbers) > 10:
+        logger.error(f"Invalid number count: {len(numbers)}")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text="Parameter 'numbers' must contain between 2 and 10 integers"
+            )],
+            isError=True,
+        )
+    
+    # Validate all elements are integers
+    if not all(isinstance(n, int) for n in numbers):
+        logger.error("Not all elements in numbers are integers")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text="All elements in 'numbers' must be integers"
+            )],
+            isError=True,
+        )
+    
+    # Check for zeros
+    if 0 in numbers:
+        logger.error("LCM is undefined for zero")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text="LCM is undefined when any number is zero"
+            )],
+            isError=True,
+        )
+    
+    # Calculate LCM
+    logger.info(f"Calculating LCM of {numbers}")
+    result = lcm(numbers)
+    
+    result_text = (
+        f"Least Common Multiple (LCM) of {numbers}:\n"
+        f"LCM = {result}"
+    )
+    
+    logger.info(f"LCM of {numbers} = {result}")
+    
+    return CallToolResult(
+        content=[TextContent(type="text", text=result_text)],
+        isError=False,
+    )
+
+
+async def handle_factorial(arguments: Any) -> CallToolResult:
+    """Handle factorial tool calls."""
+    # Extract and validate parameters
+    n = arguments.get("n")
+    
+    # Validate required parameter
+    if n is None:
+        logger.error("Missing required parameter: n")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text="Missing required parameter 'n'"
+            )],
+            isError=True,
+        )
+    
+    # Validate parameter type
+    if not isinstance(n, int):
+        logger.error(f"Invalid parameter type for n: {type(n)}")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=f"Parameter 'n' must be an integer, got {type(n).__name__}"
+            )],
+            isError=True,
+        )
+    
+    # Validate range
+    if n < 0 or n > 170:
+        logger.error(f"Parameter n out of range: {n}")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text="Parameter 'n' must be between 0 and 170"
+            )],
+            isError=True,
+        )
+    
+    # Calculate factorial
+    logger.info(f"Calculating factorial of {n}")
+    result = factorial(n)
+    
+    result_text = f"Factorial of {n}:\n{n}! = {result}"
+    
+    logger.info(f"Factorial({n}) = {result}")
+    
+    return CallToolResult(
+        content=[TextContent(type="text", text=result_text)],
+        isError=False,
+    )
+
+
+async def handle_combinations(arguments: Any) -> CallToolResult:
+    """Handle combinations tool calls."""
+    # Extract and validate parameters
+    n = arguments.get("n")
+    r = arguments.get("r")
+    
+    # Validate required parameters
+    if n is None:
+        logger.error("Missing required parameter: n")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text="Missing required parameter 'n'"
+            )],
+            isError=True,
+        )
+    
+    if r is None:
+        logger.error("Missing required parameter: r")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text="Missing required parameter 'r'"
+            )],
+            isError=True,
+        )
+    
+    # Validate parameter types
+    if not isinstance(n, int):
+        logger.error(f"Invalid parameter type for n: {type(n)}")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=f"Parameter 'n' must be an integer, got {type(n).__name__}"
+            )],
+            isError=True,
+        )
+    
+    if not isinstance(r, int):
+        logger.error(f"Invalid parameter type for r: {type(r)}")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=f"Parameter 'r' must be an integer, got {type(r).__name__}"
+            )],
+            isError=True,
+        )
+    
+    # Validate ranges
+    if n < 0 or n > 1000:
+        logger.error(f"Parameter n out of range: {n}")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text="Parameter 'n' must be between 0 and 1000"
+            )],
+            isError=True,
+        )
+    
+    if r < 0:
+        logger.error(f"Parameter r is negative: {r}")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text="Parameter 'r' must be non-negative"
+            )],
+            isError=True,
+        )
+    
+    if r > n:
+        logger.error(f"Parameter r > n: {r} > {n}")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=f"Parameter 'r' ({r}) cannot be greater than 'n' ({n})"
+            )],
+            isError=True,
+        )
+    
+    # Calculate combinations
+    logger.info(f"Calculating C({n},{r})")
+    result = combinations(n, r)
+    
+    result_text = (
+        f"Combinations C({n},{r}):\n"
+        f"Number of ways to choose {r} items from {n} items (order doesn't matter):\n"
+        f"C({n},{r}) = {result}"
+    )
+    
+    logger.info(f"C({n},{r}) = {result}")
+    
+    return CallToolResult(
+        content=[TextContent(type="text", text=result_text)],
+        isError=False,
+    )
+
+
+async def handle_permutations(arguments: Any) -> CallToolResult:
+    """Handle permutations tool calls."""
+    # Extract and validate parameters
+    n = arguments.get("n")
+    r = arguments.get("r")
+    
+    # Validate required parameters
+    if n is None:
+        logger.error("Missing required parameter: n")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text="Missing required parameter 'n'"
+            )],
+            isError=True,
+        )
+    
+    if r is None:
+        logger.error("Missing required parameter: r")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text="Missing required parameter 'r'"
+            )],
+            isError=True,
+        )
+    
+    # Validate parameter types
+    if not isinstance(n, int):
+        logger.error(f"Invalid parameter type for n: {type(n)}")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=f"Parameter 'n' must be an integer, got {type(n).__name__}"
+            )],
+            isError=True,
+        )
+    
+    if not isinstance(r, int):
+        logger.error(f"Invalid parameter type for r: {type(r)}")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=f"Parameter 'r' must be an integer, got {type(r).__name__}"
+            )],
+            isError=True,
+        )
+    
+    # Validate ranges
+    if n < 0 or n > 1000:
+        logger.error(f"Parameter n out of range: {n}")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text="Parameter 'n' must be between 0 and 1000"
+            )],
+            isError=True,
+        )
+    
+    if r < 0:
+        logger.error(f"Parameter r is negative: {r}")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text="Parameter 'r' must be non-negative"
+            )],
+            isError=True,
+        )
+    
+    if r > n:
+        logger.error(f"Parameter r > n: {r} > {n}")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=f"Parameter 'r' ({r}) cannot be greater than 'n' ({n})"
+            )],
+            isError=True,
+        )
+    
+    # Calculate permutations
+    logger.info(f"Calculating P({n},{r})")
+    result = permutations(n, r)
+    
+    result_text = (
+        f"Permutations P({n},{r}):\n"
+        f"Number of ordered ways to choose {r} items from {n} items (order matters):\n"
+        f"P({n},{r}) = {result}"
+    )
+    
+    logger.info(f"P({n},{r}) = {result}")
     
     return CallToolResult(
         content=[TextContent(type="text", text=result_text)],
