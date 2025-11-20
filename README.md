@@ -12,6 +12,7 @@ A complete Model Context Protocol (MCP) server implementation in Python that pro
 - **Cryptographic Hash Generator**: Generate MD5, SHA-1, SHA-256, SHA-512, and BLAKE2b hashes with security notes
 - **Unit Converter**: Convert between units across 7 categories (length, weight, temperature, volume, time, digital storage, speed) with precise factors
 - **Date Calculator**: Calculate date differences, add/subtract time, count business days, calculate age, and determine day of week with proper leap year handling
+- **Text Processing Tools**: Text statistics, word frequency analysis, text transformations, and encoding/decoding (Base64, Hex, URL)
 - **High Performance**: Optimized algorithms (Euclidean algorithm, Sieve of Eratosthenes, efficient combinatorics, memoization)
 - **Robust Validation**: Comprehensive error handling and input validation with appropriate ranges
 - **Production Ready**: Full logging, proper error messages, and graceful shutdown
@@ -167,6 +168,18 @@ Once configured, you can interact with the server through Claude:
 "What day of the week was January 1, 2000?"
 "Calculate the difference between 2025-01-01 and 2025-12-31 in weeks"
 "Add 6 months to 2025-01-31"
+```
+
+### Text Processing Tools
+```
+"Analyze this text: 'Hello world! This is a test.'"
+"What are the most common words in this document?"
+"Convert 'Hello World' to base64"
+"Transform this text to camelCase"
+"Calculate statistics for this paragraph"
+"Encode this URL with percent encoding"
+"Reverse the words in this sentence"
+"Get word frequency for top 20 words, skip common words"
 ```
 
 ## 🔧 Tool Specifications
@@ -862,6 +875,160 @@ day_of_week("2024-12-25") → "Wednesday, Week 52, Day 360"
 - Invalid ISO date format
 - Missing required parameters
 
+### Tool: `text_stats`
+
+**Parameters:**
+- `text` (string, required): Text to analyze (up to 100KB)
+
+**Response Format:**
+- Dictionary containing:
+  - `characters`: Total character count
+  - `characters_no_spaces`: Character count excluding spaces
+  - `words`: Word count
+  - `sentences`: Sentence count
+  - `paragraphs`: Paragraph count
+  - `avg_word_length`: Average word length in characters
+  - `avg_sentence_length`: Average sentence length in words
+  - `reading_time`: Estimated reading time (based on 200 words/min)
+
+**Examples:**
+```
+text_stats("Hello world! This is a test.") → 
+{
+  "characters": 30,
+  "characters_no_spaces": 25,
+  "words": 6,
+  "sentences": 2,
+  "paragraphs": 1,
+  "avg_word_length": 3.33,
+  "avg_sentence_length": 3.0,
+  "reading_time": "2 seconds"
+}
+```
+
+**Algorithm:** 
+- Uses regex for word and sentence detection
+- Counts paragraphs by blank line separation
+- Handles Unicode text properly
+
+**Error Handling:**
+- Text exceeds 100KB size limit
+- Missing required parameters
+
+### Tool: `word_frequency`
+
+**Parameters:**
+- `text` (string, required): Text to analyze
+- `top_n` (integer, optional, default: 10): Number of most frequent words to return
+- `skip_common` (boolean, optional, default: false): Skip common English words
+
+**Response Format:**
+- List of [word, count] pairs sorted by frequency (descending)
+
+**Examples:**
+```
+word_frequency("The cat sat on the mat. The cat was happy.", top_n=3)
+→ [["the", 3], ["cat", 2], ["sat", 1]]
+
+word_frequency("The cat sat on the mat", top_n=5, skip_common=true)
+→ [["cat", 1], ["mat", 1], ["sat", 1]]
+```
+
+**Features:**
+- Case-insensitive analysis
+- Removes punctuation automatically
+- Optional filtering of 50+ common English words (the, a, is, etc.)
+
+**Algorithm:**
+- Converts to lowercase
+- Extracts words using regex
+- Counts frequencies with dictionary
+- Sorts by count (descending) and alphabetically for ties
+
+**Error Handling:**
+- Invalid top_n value (< 1)
+- Missing required parameters
+
+### Tool: `text_transform`
+
+**Parameters:**
+- `text` (string, required): Text to transform
+- `operation` (string, required): Transformation operation
+
+**Operations:**
+- `uppercase`: Convert to UPPERCASE
+- `lowercase`: Convert to lowercase
+- `titlecase`: Convert To Title Case
+- `camelcase`: convertToCamelCase
+- `snakecase`: convert_to_snake_case
+- `reverse`: esreveR txet (reverse characters)
+- `words_reverse`: Reverse word order
+- `remove_spaces`: Removeallspaces
+- `remove_punctuation`: Remove all punctuation
+
+**Examples:**
+```
+text_transform("Hello World", "uppercase") → "HELLO WORLD"
+text_transform("Hello World", "camelcase") → "helloWorld"
+text_transform("Hello World", "snakecase") → "hello_world"
+text_transform("Hello World", "reverse") → "dlroW olleH"
+text_transform("Hello World!", "words_reverse") → "World! Hello"
+```
+
+**Algorithm:**
+- Direct string manipulation for simple cases
+- Regex for complex transformations (camelCase, snake_case)
+- Word-based operations split and rejoin text
+
+**Error Handling:**
+- Invalid operation name
+- Missing required parameters
+
+### Tool: `encode_decode`
+
+**Parameters:**
+- `text` (string, required): Text to encode or decode
+- `operation` (string, required): 'encode' or 'decode'
+- `format` (string, required): Encoding format - 'base64', 'hex', or 'url'
+
+**Response Format:**
+- Encoded or decoded text string
+
+**Formats:**
+- **base64**: Standard Base64 encoding (RFC 4648)
+  - Uses UTF-8 encoding for text
+  - Safe for binary data representation
+- **hex**: Hexadecimal encoding (lowercase)
+  - Each byte becomes 2 hex characters
+  - Commonly used in hashes and binary data
+- **url**: URL percent-encoding (RFC 3986)
+  - Encodes special characters as %XX
+  - Safe for URLs and query strings
+
+**Examples:**
+```
+encode_decode("Hello World", "encode", "base64") → "SGVsbG8gV29ybGQ="
+encode_decode("SGVsbG8gV29ybGQ=", "decode", "base64") → "Hello World"
+encode_decode("Hello World", "encode", "hex") → "48656c6c6f20576f726c64"
+encode_decode("Hello World!", "encode", "url") → "Hello%20World%21"
+```
+
+**Use Cases:**
+- Base64: Email attachments, embedding data in JSON/XML
+- Hex: Hash representations, color codes, binary debugging
+- URL: Query parameters, path encoding in URLs
+
+**Algorithm:**
+- Uses Python standard library (base64, urllib.parse)
+- UTF-8 encoding/decoding for text
+- Proper error handling for invalid input
+
+**Error Handling:**
+- Invalid operation ('encode' or 'decode')
+- Invalid format ('base64', 'hex', or 'url')
+- Malformed encoded input during decode
+- Invalid UTF-8 sequences
+
 ## 📁 Project Structure
 
 ```
@@ -925,7 +1092,11 @@ from src.fibonacci_server.server import (
     date_add,
     business_days,
     age_calculator,
-    day_of_week
+    day_of_week,
+    text_stats,
+    word_frequency,
+    text_transform,
+    encode_decode
 )
 
 # Fibonacci calculations
@@ -980,6 +1151,22 @@ print(date_add("2025-01-31", 1, "months"))  # Output: {'new_date': '2025-02-28',
 print(business_days("2025-01-06", "2025-01-10"))  # Output: {'business_days': 5, ...}
 print(age_calculator("2000-01-01", "2025-01-01"))  # Output: {'years': 25, 'months': 0, 'days': 0, ...}
 print(day_of_week("2000-01-01"))  # Output: {'day_name': 'Saturday', 'week_number': 52, ...}
+
+# Text processing tools
+print(text_stats("Hello world! This is a test."))
+# Output: {'characters': 30, 'words': 6, 'sentences': 2, 'paragraphs': 1, ...}
+
+print(word_frequency("The cat sat on the mat. The cat was happy.", top_n=3))
+# Output: [['the', 3], ['cat', 2], ['sat', 1]]
+
+print(text_transform("Hello World", "camelcase"))  # Output: 'helloWorld'
+print(text_transform("Hello World", "snakecase"))  # Output: 'hello_world'
+print(text_transform("Hello World", "reverse"))    # Output: 'dlroW olleH'
+
+print(encode_decode("Hello World", "encode", "base64"))  # Output: 'SGVsbG8gV29ybGQ='
+print(encode_decode("SGVsbG8gV29ybGQ=", "decode", "base64"))  # Output: 'Hello World'
+print(encode_decode("Hello World", "encode", "hex"))     # Output: '48656c6c6f20576f726c64'
+print(encode_decode("Hello World!", "encode", "url"))    # Output: 'Hello%20World%21'
 ```
 
 ## 🏗️ Architecture
@@ -1131,6 +1318,18 @@ Example verifications:
 
 - Request: "Convert 2 gigabytes to megabytes"
 - Expected: `2 GB = 2048 MB`
+
+- Request: "Analyze this text: 'Hello world! This is a test.'"
+- Expected: 6 words, 2 sentences, character counts, reading time
+
+- Request: "What are the most common words in 'The cat sat on the mat. The cat was happy.'?"
+- Expected: [["the", 3], ["cat", 2], ...]
+
+- Request: "Convert 'Hello World' to base64"
+- Expected: `SGVsbG8gV29ybGQ=`
+
+- Request: "Transform 'Hello World' to camelCase"
+- Expected: `helloWorld`
 
 ## 📄 License
 

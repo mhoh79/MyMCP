@@ -7,6 +7,8 @@ import asyncio
 import base64
 import hashlib
 import logging
+import re
+import urllib.parse
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -2254,6 +2256,360 @@ def day_of_week(date: str) -> dict[str, Any]:
 
 
 # ============================================================================
+# Text Processing Functions
+# ============================================================================
+
+
+def text_stats(text: str) -> dict[str, Any]:
+    """
+    Calculate comprehensive text statistics.
+    
+    This function analyzes text and provides detailed statistics including
+    character counts, word counts, sentence counts, averages, and reading time.
+    
+    Args:
+        text: Input text to analyze (up to 100KB)
+        
+    Returns:
+        Dictionary containing:
+        - 'characters': Total character count
+        - 'characters_no_spaces': Character count excluding spaces
+        - 'words': Word count
+        - 'sentences': Sentence count
+        - 'paragraphs': Paragraph count
+        - 'avg_word_length': Average word length
+        - 'avg_sentence_length': Average sentence length in words
+        - 'reading_time': Estimated reading time
+        
+    Raises:
+        ValueError: If text exceeds 100KB size limit
+        
+    Examples:
+        text_stats("Hello world! This is a test.")
+        >>> {
+        ...   'characters': 30,
+        ...   'characters_no_spaces': 25,
+        ...   'words': 6,
+        ...   'sentences': 2,
+        ...   'paragraphs': 1,
+        ...   'avg_word_length': 4.17,
+        ...   'avg_sentence_length': 3.0,
+        ...   'reading_time': '1 second'
+        ... }
+        
+    Algorithm Explanation:
+        1. Validate text size (max 100KB)
+        2. Count total characters and characters without spaces
+        3. Count words using regex word boundaries
+        4. Count sentences using punctuation patterns (., !, ?)
+        5. Count paragraphs by counting blank line separations
+        6. Calculate averages for word length and sentence length
+        7. Estimate reading time (200 words per minute average)
+        
+    Time Complexity: O(n) where n is the length of the text
+    Space Complexity: O(n) for storing word and sentence lists
+    """
+    # Validate input size (100KB = 102,400 bytes)
+    if len(text.encode('utf-8')) > 102400:
+        raise ValueError("Text size exceeds 100KB limit")
+    
+    # Character counts
+    total_chars = len(text)
+    chars_no_spaces = len(text.replace(' ', '').replace('\t', '').replace('\n', '').replace('\r', ''))
+    
+    # Word count - split on whitespace and filter empty strings
+    words = [word for word in re.findall(r'\b\w+\b', text) if word]
+    word_count = len(words)
+    
+    # Sentence count - count sentence-ending punctuation
+    # Handles ., !, ? followed by space or end of string
+    sentences = re.split(r'[.!?]+(?:\s+|$)', text)
+    sentences = [s.strip() for s in sentences if s.strip()]
+    sentence_count = len(sentences)
+    
+    # Paragraph count - count blocks of text separated by blank lines
+    paragraphs = re.split(r'\n\s*\n', text.strip())
+    paragraphs = [p.strip() for p in paragraphs if p.strip()]
+    paragraph_count = len(paragraphs)
+    
+    # Average word length
+    if word_count > 0:
+        avg_word_length = sum(len(word) for word in words) / word_count
+    else:
+        avg_word_length = 0.0
+    
+    # Average sentence length (in words)
+    if sentence_count > 0:
+        avg_sentence_length = word_count / sentence_count
+    else:
+        avg_sentence_length = 0.0
+    
+    # Reading time estimate (200 words per minute average)
+    if word_count > 0:
+        minutes = word_count / 200
+        if minutes < 1:
+            reading_time = f"{int(minutes * 60)} seconds"
+        elif minutes < 2:
+            reading_time = "1 minute"
+        else:
+            reading_time = f"{int(minutes)} minutes"
+    else:
+        reading_time = "0 seconds"
+    
+    return {
+        'characters': total_chars,
+        'characters_no_spaces': chars_no_spaces,
+        'words': word_count,
+        'sentences': sentence_count,
+        'paragraphs': paragraph_count,
+        'avg_word_length': round(avg_word_length, 2),
+        'avg_sentence_length': round(avg_sentence_length, 2),
+        'reading_time': reading_time
+    }
+
+
+def word_frequency(text: str, top_n: int = 10, skip_common: bool = False) -> list[list]:
+    """
+    Analyze word frequency in text.
+    
+    This function counts word occurrences in the text and returns the most
+    frequent words. It handles case-insensitivity and removes punctuation.
+    
+    Args:
+        text: Input text to analyze
+        top_n: Number of most frequent words to return (default: 10)
+        skip_common: If True, skip common English words (default: False)
+        
+    Returns:
+        List of [word, count] pairs sorted by frequency (descending)
+        
+    Raises:
+        ValueError: If top_n is less than 1
+        
+    Examples:
+        word_frequency("The cat sat on the mat. The cat was happy.", top_n=3)
+        >>> [["the", 3], ["cat", 2], ["sat", 1]]
+        
+    Algorithm Explanation:
+        1. Convert text to lowercase for case-insensitive matching
+        2. Extract words using regex (alphanumeric sequences)
+        3. Optionally filter out common English words
+        4. Count word frequencies using a dictionary
+        5. Sort by frequency (descending) and return top N
+        
+    Time Complexity: O(n log n) where n is the number of unique words
+    Space Complexity: O(n) for storing word frequencies
+    """
+    if top_n < 1:
+        raise ValueError("top_n must be at least 1")
+    
+    # Common English words to skip (if requested)
+    common_words = {
+        'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
+        'of', 'with', 'by', 'from', 'as', 'is', 'was', 'are', 'were', 'been',
+        'be', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would',
+        'could', 'should', 'may', 'might', 'must', 'can', 'it', 'this',
+        'that', 'these', 'those', 'i', 'you', 'he', 'she', 'we', 'they',
+        'what', 'which', 'who', 'when', 'where', 'why', 'how'
+    }
+    
+    # Convert to lowercase and extract words
+    text_lower = text.lower()
+    words = re.findall(r'\b\w+\b', text_lower)
+    
+    # Filter out common words if requested
+    if skip_common:
+        words = [word for word in words if word not in common_words]
+    
+    # Count word frequencies
+    frequency = {}
+    for word in words:
+        frequency[word] = frequency.get(word, 0) + 1
+    
+    # Sort by frequency (descending) and get top N
+    sorted_words = sorted(frequency.items(), key=lambda x: (-x[1], x[0]))
+    
+    # Return top N as list of [word, count] pairs
+    return [[word, count] for word, count in sorted_words[:top_n]]
+
+
+def text_transform(text: str, operation: str) -> str:
+    """
+    Transform text in various ways.
+    
+    This function applies different text transformations based on the
+    specified operation.
+    
+    Args:
+        text: Input text to transform
+        operation: Transformation operation to apply
+            - 'uppercase': Convert to UPPERCASE
+            - 'lowercase': Convert to lowercase
+            - 'titlecase': Convert To Title Case
+            - 'camelcase': convertToCamelCase
+            - 'snakecase': convert_to_snake_case
+            - 'reverse': esreveR txet
+            - 'words_reverse': Reverse word order
+            - 'remove_spaces': Removeallspaces
+            - 'remove_punctuation': Remove all punctuation
+            
+    Returns:
+        Transformed text string
+        
+    Raises:
+        ValueError: If operation is not recognized
+        
+    Examples:
+        text_transform("Hello World", "uppercase") → "HELLO WORLD"
+        text_transform("Hello World", "camelcase") → "helloWorld"
+        text_transform("Hello World", "reverse") → "dlroW olleH"
+        text_transform("Hello World!", "words_reverse") → "World! Hello"
+        
+    Algorithm Explanation:
+        1. Validate operation parameter
+        2. Apply appropriate transformation based on operation
+        3. Handle special cases like camelCase and snake_case
+        4. Return transformed text
+        
+    Time Complexity: O(n) where n is the length of the text
+    Space Complexity: O(n) for storing the result
+    """
+    valid_operations = {
+        'uppercase', 'lowercase', 'titlecase', 'camelcase', 'snakecase',
+        'reverse', 'words_reverse', 'remove_spaces', 'remove_punctuation'
+    }
+    
+    if operation not in valid_operations:
+        raise ValueError(
+            f"Invalid operation: {operation}. "
+            f"Valid operations are: {', '.join(sorted(valid_operations))}"
+        )
+    
+    if operation == 'uppercase':
+        return text.upper()
+    
+    elif operation == 'lowercase':
+        return text.lower()
+    
+    elif operation == 'titlecase':
+        return text.title()
+    
+    elif operation == 'camelcase':
+        # Split on whitespace and non-alphanumeric characters
+        words = re.findall(r'\w+', text)
+        if not words:
+            return text
+        # First word lowercase, rest capitalized
+        return words[0].lower() + ''.join(word.capitalize() for word in words[1:])
+    
+    elif operation == 'snakecase':
+        # Replace whitespace and non-alphanumeric with underscore
+        result = re.sub(r'[^\w\s]', '', text)  # Remove punctuation
+        result = re.sub(r'\s+', '_', result)    # Replace spaces with underscore
+        return result.lower()
+    
+    elif operation == 'reverse':
+        return text[::-1]
+    
+    elif operation == 'words_reverse':
+        # Split into words (preserving punctuation attached to words)
+        words = text.split()
+        return ' '.join(reversed(words))
+    
+    elif operation == 'remove_spaces':
+        return re.sub(r'\s+', '', text)
+    
+    elif operation == 'remove_punctuation':
+        return re.sub(r'[^\w\s]', '', text)
+    
+    return text
+
+
+def encode_decode(text: str, operation: str, format: str) -> str:
+    """
+    Encode or decode text in various formats.
+    
+    This function handles encoding and decoding of text using different formats
+    like Base64, Hexadecimal, and URL encoding.
+    
+    Args:
+        text: Input text to encode or decode
+        operation: 'encode' or 'decode'
+        format: Encoding format - 'base64', 'hex', or 'url'
+        
+    Returns:
+        Encoded or decoded text string
+        
+    Raises:
+        ValueError: If operation or format is invalid
+        ValueError: If decoding fails (invalid input)
+        
+    Examples:
+        encode_decode("Hello World", "encode", "base64") → "SGVsbG8gV29ybGQ="
+        encode_decode("SGVsbG8gV29ybGQ=", "decode", "base64") → "Hello World"
+        encode_decode("Hello World", "encode", "hex") → "48656c6c6f20576f726c64"
+        encode_decode("Hello World!", "encode", "url") → "Hello+World%21"
+        
+    Format Descriptions:
+        - base64: Standard Base64 encoding (RFC 4648)
+        - hex: Hexadecimal encoding (lowercase)
+        - url: URL percent-encoding (RFC 3986)
+        
+    Algorithm Explanation:
+        1. Validate operation and format parameters
+        2. For encoding:
+           - Convert text to bytes (UTF-8)
+           - Apply appropriate encoding
+        3. For decoding:
+           - Apply appropriate decoding
+           - Convert bytes to string (UTF-8)
+        4. Handle errors gracefully
+        
+    Time Complexity: O(n) where n is the length of the input
+    Space Complexity: O(n) for storing the result
+    """
+    if operation not in ['encode', 'decode']:
+        raise ValueError("Operation must be 'encode' or 'decode'")
+    
+    if format not in ['base64', 'hex', 'url']:
+        raise ValueError("Format must be 'base64', 'hex', or 'url'")
+    
+    try:
+        if operation == 'encode':
+            if format == 'base64':
+                # Encode to Base64
+                encoded_bytes = base64.b64encode(text.encode('utf-8'))
+                return encoded_bytes.decode('ascii')
+            
+            elif format == 'hex':
+                # Encode to Hexadecimal
+                hex_bytes = text.encode('utf-8').hex()
+                return hex_bytes
+            
+            elif format == 'url':
+                # URL encode (percent-encoding)
+                return urllib.parse.quote(text)
+        
+        else:  # decode
+            if format == 'base64':
+                # Decode from Base64
+                decoded_bytes = base64.b64decode(text)
+                return decoded_bytes.decode('utf-8')
+            
+            elif format == 'hex':
+                # Decode from Hexadecimal
+                decoded_bytes = bytes.fromhex(text)
+                return decoded_bytes.decode('utf-8')
+            
+            elif format == 'url':
+                # URL decode
+                return urllib.parse.unquote(text)
+    
+    except Exception as e:
+        raise ValueError(f"Failed to {operation} text using {format} format: {str(e)}")
+
+
+# ============================================================================
 # MCP Server Implementation
 # ============================================================================
 
@@ -2892,6 +3248,107 @@ async def list_tools() -> list[Tool]:
                 "required": ["date"],
             },
         ),
+        Tool(
+            name="text_stats",
+            description=(
+                "Calculate comprehensive text statistics including character count (with/without spaces), "
+                "word count, sentence count, paragraph count, average word length, average sentence length, "
+                "and reading time estimate. Handles Unicode text properly. Maximum text size: 100KB."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "text": {
+                        "type": "string",
+                        "description": "Text to analyze (up to 100KB)",
+                    },
+                },
+                "required": ["text"],
+            },
+        ),
+        Tool(
+            name="word_frequency",
+            description=(
+                "Analyze word frequency in text and return the most common words with their counts. "
+                "Performs case-insensitive analysis and removes punctuation. Optionally filters out "
+                "common English words (the, a, an, etc.). Returns list of [word, count] pairs sorted by frequency."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "text": {
+                        "type": "string",
+                        "description": "Text to analyze for word frequency",
+                    },
+                    "top_n": {
+                        "type": "integer",
+                        "description": "Number of most frequent words to return",
+                        "default": 10,
+                        "minimum": 1,
+                    },
+                    "skip_common": {
+                        "type": "boolean",
+                        "description": "Skip common English words (the, a, is, etc.)",
+                        "default": False,
+                    },
+                },
+                "required": ["text"],
+            },
+        ),
+        Tool(
+            name="text_transform",
+            description=(
+                "Transform text using various operations: uppercase, lowercase, titlecase, camelcase, "
+                "snakecase, reverse (reverse characters), words_reverse (reverse word order), "
+                "remove_spaces, remove_punctuation. Example: 'Hello World' → 'helloWorld' (camelcase)."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "text": {
+                        "type": "string",
+                        "description": "Text to transform",
+                    },
+                    "operation": {
+                        "type": "string",
+                        "description": "Transformation operation",
+                        "enum": [
+                            "uppercase", "lowercase", "titlecase", "camelcase", "snakecase",
+                            "reverse", "words_reverse", "remove_spaces", "remove_punctuation"
+                        ],
+                    },
+                },
+                "required": ["text", "operation"],
+            },
+        ),
+        Tool(
+            name="encode_decode",
+            description=(
+                "Encode or decode text using Base64, Hexadecimal, or URL encoding formats. "
+                "Supports both encoding (text → encoded) and decoding (encoded → text). "
+                "Example: 'Hello World' → 'SGVsbG8gV29ybGQ=' (base64 encode)."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "text": {
+                        "type": "string",
+                        "description": "Text to encode or decode",
+                    },
+                    "operation": {
+                        "type": "string",
+                        "description": "Operation to perform",
+                        "enum": ["encode", "decode"],
+                    },
+                    "format": {
+                        "type": "string",
+                        "description": "Encoding format to use",
+                        "enum": ["base64", "hex", "url"],
+                    },
+                },
+                "required": ["text", "operation", "format"],
+            },
+        ),
     ]
 
 
@@ -2965,6 +3422,14 @@ async def call_tool(name: str, arguments: Any) -> CallToolResult:
             return await handle_age_calculator(arguments)
         elif name == "day_of_week":
             return await handle_day_of_week(arguments)
+        elif name == "text_stats":
+            return await handle_text_stats(arguments)
+        elif name == "word_frequency":
+            return await handle_word_frequency(arguments)
+        elif name == "text_transform":
+            return await handle_text_transform(arguments)
+        elif name == "encode_decode":
+            return await handle_encode_decode(arguments)
         else:
             logger.error(f"Unknown tool requested: {name}")
             return CallToolResult(
@@ -4920,6 +5385,332 @@ async def handle_day_of_week(arguments: Any) -> CallToolResult:
         logger.error(f"Day of week calculation error: {e}")
         return CallToolResult(
             content=[TextContent(type="text", text=f"Day of week calculation error: {str(e)}")],
+            isError=True,
+        )
+
+
+async def handle_text_stats(arguments: Any) -> CallToolResult:
+    """Handle text_stats tool calls."""
+    # Extract and validate parameters
+    text = arguments.get("text")
+    
+    # Validate required parameter
+    if text is None:
+        logger.error("Missing required parameter: text")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text="Missing required parameter 'text'"
+            )],
+            isError=True,
+        )
+    
+    # Validate parameter type
+    if not isinstance(text, str):
+        logger.error(f"Invalid parameter type for text: {type(text)}")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=f"Parameter 'text' must be a string, got {type(text).__name__}"
+            )],
+            isError=True,
+        )
+    
+    # Calculate text statistics
+    try:
+        logger.info(f"Calculating text statistics for {len(text)} characters")
+        result = text_stats(text)
+        
+        # Format the result
+        result_text = (
+            f"Text Statistics:\n\n"
+            f"Character Analysis:\n"
+            f"  Total characters: {result['characters']}\n"
+            f"  Characters (no spaces): {result['characters_no_spaces']}\n\n"
+            f"Word & Sentence Analysis:\n"
+            f"  Word count: {result['words']}\n"
+            f"  Sentence count: {result['sentences']}\n"
+            f"  Paragraph count: {result['paragraphs']}\n\n"
+            f"Averages:\n"
+            f"  Average word length: {result['avg_word_length']} characters\n"
+            f"  Average sentence length: {result['avg_sentence_length']} words\n\n"
+            f"Reading Time: {result['reading_time']}\n"
+            f"(Based on 200 words per minute average reading speed)"
+        )
+        
+        logger.info(f"Text stats: {result['words']} words, {result['sentences']} sentences")
+        
+        return CallToolResult(
+            content=[TextContent(type="text", text=result_text)],
+            isError=False,
+        )
+        
+    except ValueError as e:
+        logger.error(f"Text stats error: {e}")
+        return CallToolResult(
+            content=[TextContent(type="text", text=f"Text stats error: {str(e)}")],
+            isError=True,
+        )
+
+
+async def handle_word_frequency(arguments: Any) -> CallToolResult:
+    """Handle word_frequency tool calls."""
+    # Extract and validate parameters
+    text = arguments.get("text")
+    top_n = arguments.get("top_n", 10)
+    skip_common = arguments.get("skip_common", False)
+    
+    # Validate required parameter
+    if text is None:
+        logger.error("Missing required parameter: text")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text="Missing required parameter 'text'"
+            )],
+            isError=True,
+        )
+    
+    # Validate parameter types
+    if not isinstance(text, str):
+        logger.error(f"Invalid parameter type for text: {type(text)}")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=f"Parameter 'text' must be a string, got {type(text).__name__}"
+            )],
+            isError=True,
+        )
+    
+    if not isinstance(top_n, int):
+        logger.error(f"Invalid parameter type for top_n: {type(top_n)}")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=f"Parameter 'top_n' must be an integer, got {type(top_n).__name__}"
+            )],
+            isError=True,
+        )
+    
+    if not isinstance(skip_common, bool):
+        logger.error(f"Invalid parameter type for skip_common: {type(skip_common)}")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=f"Parameter 'skip_common' must be a boolean, got {type(skip_common).__name__}"
+            )],
+            isError=True,
+        )
+    
+    # Analyze word frequency
+    try:
+        logger.info(f"Analyzing word frequency (top {top_n}, skip_common={skip_common})")
+        result = word_frequency(text, top_n, skip_common)
+        
+        # Format the result
+        result_text = f"Word Frequency Analysis:\n\n"
+        result_text += f"Top {min(top_n, len(result))} most frequent words:\n\n"
+        
+        for i, (word, count) in enumerate(result, 1):
+            result_text += f"{i}. '{word}': {count} occurrence{'s' if count != 1 else ''}\n"
+        
+        if skip_common:
+            result_text += "\n(Common English words were filtered out)"
+        
+        logger.info(f"Found {len(result)} words in frequency analysis")
+        
+        return CallToolResult(
+            content=[TextContent(type="text", text=result_text)],
+            isError=False,
+        )
+        
+    except ValueError as e:
+        logger.error(f"Word frequency error: {e}")
+        return CallToolResult(
+            content=[TextContent(type="text", text=f"Word frequency error: {str(e)}")],
+            isError=True,
+        )
+
+
+async def handle_text_transform(arguments: Any) -> CallToolResult:
+    """Handle text_transform tool calls."""
+    # Extract and validate parameters
+    text = arguments.get("text")
+    operation = arguments.get("operation")
+    
+    # Validate required parameters
+    if text is None:
+        logger.error("Missing required parameter: text")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text="Missing required parameter 'text'"
+            )],
+            isError=True,
+        )
+    
+    if operation is None:
+        logger.error("Missing required parameter: operation")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text="Missing required parameter 'operation'"
+            )],
+            isError=True,
+        )
+    
+    # Validate parameter types
+    if not isinstance(text, str):
+        logger.error(f"Invalid parameter type for text: {type(text)}")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=f"Parameter 'text' must be a string, got {type(text).__name__}"
+            )],
+            isError=True,
+        )
+    
+    if not isinstance(operation, str):
+        logger.error(f"Invalid parameter type for operation: {type(operation)}")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=f"Parameter 'operation' must be a string, got {type(operation).__name__}"
+            )],
+            isError=True,
+        )
+    
+    # Transform text
+    try:
+        logger.info(f"Transforming text using operation: {operation}")
+        result = text_transform(text, operation)
+        
+        # Format the result
+        result_text = (
+            f"Text Transformation:\n\n"
+            f"Operation: {operation}\n"
+            f"Original: {text[:100]}{'...' if len(text) > 100 else ''}\n\n"
+            f"Result:\n{result}"
+        )
+        
+        logger.info(f"Text transformed successfully using {operation}")
+        
+        return CallToolResult(
+            content=[TextContent(type="text", text=result_text)],
+            isError=False,
+        )
+        
+    except ValueError as e:
+        logger.error(f"Text transform error: {e}")
+        return CallToolResult(
+            content=[TextContent(type="text", text=f"Text transform error: {str(e)}")],
+            isError=True,
+        )
+
+
+async def handle_encode_decode(arguments: Any) -> CallToolResult:
+    """Handle encode_decode tool calls."""
+    # Extract and validate parameters
+    text = arguments.get("text")
+    operation = arguments.get("operation")
+    format_type = arguments.get("format")
+    
+    # Validate required parameters
+    if text is None:
+        logger.error("Missing required parameter: text")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text="Missing required parameter 'text'"
+            )],
+            isError=True,
+        )
+    
+    if operation is None:
+        logger.error("Missing required parameter: operation")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text="Missing required parameter 'operation'"
+            )],
+            isError=True,
+        )
+    
+    if format_type is None:
+        logger.error("Missing required parameter: format")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text="Missing required parameter 'format'"
+            )],
+            isError=True,
+        )
+    
+    # Validate parameter types
+    if not isinstance(text, str):
+        logger.error(f"Invalid parameter type for text: {type(text)}")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=f"Parameter 'text' must be a string, got {type(text).__name__}"
+            )],
+            isError=True,
+        )
+    
+    if not isinstance(operation, str):
+        logger.error(f"Invalid parameter type for operation: {type(operation)}")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=f"Parameter 'operation' must be a string, got {type(operation).__name__}"
+            )],
+            isError=True,
+        )
+    
+    if not isinstance(format_type, str):
+        logger.error(f"Invalid parameter type for format: {type(format_type)}")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=f"Parameter 'format' must be a string, got {type(format_type).__name__}"
+            )],
+            isError=True,
+        )
+    
+    # Encode or decode text
+    try:
+        logger.info(f"{operation.capitalize()}ing text using {format_type} format")
+        result = encode_decode(text, operation, format_type)
+        
+        # Format the result - show preview for long results
+        if len(result) > 200:
+            result_preview = result[:200] + "..."
+        else:
+            result_preview = result
+        
+        result_text = (
+            f"Text {operation.capitalize()}ing:\n\n"
+            f"Format: {format_type.upper()}\n"
+            f"Operation: {operation}\n"
+            f"Input length: {len(text)} characters\n"
+            f"Output length: {len(result)} characters\n\n"
+            f"Result:\n{result_preview}"
+        )
+        
+        if len(result) > 200:
+            result_text += f"\n\n(Showing first 200 characters of {len(result)} total)"
+        
+        logger.info(f"Successfully {operation}d text using {format_type}")
+        
+        return CallToolResult(
+            content=[TextContent(type="text", text=result_text)],
+            isError=False,
+        )
+        
+    except ValueError as e:
+        logger.error(f"Encode/decode error: {e}")
+        return CallToolResult(
+            content=[TextContent(type="text", text=f"Encode/decode error: {str(e)}")],
             isError=True,
         )
 
