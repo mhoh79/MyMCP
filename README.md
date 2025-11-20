@@ -657,32 +657,35 @@ Once configured, you can interact with the server through Claude:
 - Non-numeric data
 - Empty dataset
 
-### Tool: `outliers`
+### Tool: `detect_outliers`
 
 **Parameters:**
-- `data` (array of numbers, required): Dataset to analyze (1-10000 items)
+- `data` (array of numbers, required): Dataset to analyze (4-10000 items)
+- `threshold` (number, optional, default: 1.5): IQR multiplier (0.1-10, use 1.5 for standard outliers, 3.0 for extreme outliers)
 
 **Response Format:**
 - `outliers`: List of outlier values
 - `indices`: Indices of outliers in original data
 - `count`: Number of outliers
-- `lower_bound`: Lower threshold (Q1 - 1.5×IQR)
-- `upper_bound`: Upper threshold (Q3 + 1.5×IQR)
+- `lower_bound`: Lower threshold (Q1 - threshold×IQR)
+- `upper_bound`: Upper threshold (Q3 + threshold×IQR)
 - `q1`: First quartile (25th percentile)
 - `q3`: Third quartile (75th percentile)
 - `iqr`: Interquartile range (Q3 - Q1)
+- `threshold`: The threshold multiplier used
 
-**Method:** IQR (Interquartile Range) method
+**Method:** IQR (Interquartile Range) method with configurable threshold
 - Calculate Q1 and Q3
 - IQR = Q3 - Q1
-- Lower bound = Q1 - 1.5 × IQR
-- Upper bound = Q3 + 1.5 × IQR
+- Lower bound = Q1 - threshold × IQR
+- Upper bound = Q3 + threshold × IQR
 - Values outside [lower_bound, upper_bound] are outliers
 
 **Examples:**
 ```
-[10, 12, 14, 13, 15, 100, 11, 13, 14] → outliers: [100], count: 1
-[10, 11, 12, 13, 14, 15] → outliers: [], count: 0 (no outliers)
+detect_outliers([10, 12, 14, 13, 15, 100, 11, 13, 14]) → outliers: [100], count: 1
+detect_outliers([10, 11, 12, 13, 14, 15]) → outliers: [], count: 0 (no outliers)
+detect_outliers([10, 12, 14, 13, 15, 100, 11, 13, 14], threshold=3.0) → fewer/different outliers detected
 ```
 
 **Algorithm:** Uses percentile calculations with O(n log n) complexity
@@ -1356,7 +1359,7 @@ Example verifications:
 - Request: "Find the 75th percentile of [23, 45, 12, 67, 34, 89, 23, 56]"
 - Expected: 58.75
 
-- Request: "Identify outliers in [10, 12, 14, 13, 15, 100, 11, 13, 14]"
+- Request: "Detect outliers in [10, 12, 14, 13, 15, 100, 11, 13, 14]"
 - Expected: Outliers: [100], Count: 1
 
 - Request: "Convert 100 kilometers to miles"
