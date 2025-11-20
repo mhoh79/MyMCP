@@ -11,6 +11,7 @@ A complete Model Context Protocol (MCP) server implementation in Python that pro
 - **Statistical Analysis**: Descriptive statistics, correlation analysis, percentile calculations, and outlier detection
 - **Cryptographic Hash Generator**: Generate MD5, SHA-1, SHA-256, SHA-512, and BLAKE2b hashes with security notes
 - **Unit Converter**: Convert between units across 7 categories (length, weight, temperature, volume, time, digital storage, speed) with precise factors
+- **Date Calculator**: Calculate date differences, add/subtract time, count business days, calculate age, and determine day of week with proper leap year handling
 - **High Performance**: Optimized algorithms (Euclidean algorithm, Sieve of Eratosthenes, efficient combinatorics, memoization)
 - **Robust Validation**: Comprehensive error handling and input validation with appropriate ranges
 - **Production Ready**: Full logging, proper error messages, and graceful shutdown
@@ -155,6 +156,17 @@ Once configured, you can interact with the server through Claude:
 "Convert 1 gallon to liters"
 "How many seconds in 2 hours?"
 "Convert 60 miles per hour to kilometers per hour"
+```
+
+### Date Calculator
+```
+"How many days until Christmas 2025?"
+"What date is 90 days from today?"
+"How many business days between January 1 and January 31, 2025?"
+"How old is someone born on January 1, 2000?"
+"What day of the week was January 1, 2000?"
+"Calculate the difference between 2025-01-01 and 2025-12-31 in weeks"
+"Add 6 months to 2025-01-31"
 ```
 
 ## 🔧 Tool Specifications
@@ -708,6 +720,148 @@ Once configured, you can interact with the server through Claude:
 - Invalid parameter types
 - Missing required parameters
 
+### Tool: `date_diff`
+
+**Parameters:**
+- `date1` (string, required): First date in ISO format (YYYY-MM-DD)
+- `date2` (string, required): Second date in ISO format (YYYY-MM-DD)
+- `unit` (string, optional, default: "all"): Unit of difference
+  - `days`: Total days between dates
+  - `weeks`: Weeks and remaining days
+  - `months`: Total months
+  - `years`: Years, months, and days
+  - `all`: Complete breakdown in all units
+
+**Response Format:**
+- Formatted difference string with detailed breakdown
+- Total days count
+- Human-readable summary
+
+**Examples:**
+```
+date_diff("2025-01-01", "2025-12-31", "days") → 364 days
+date_diff("2025-01-01", "2025-12-31", "all") → "0 years, 11 months, 30 days"
+date_diff("2020-01-01", "2025-01-01", "years") → "5 years"
+```
+
+**Algorithm:** Uses relativedelta for accurate month/year calculations with proper leap year handling
+
+**Error Handling:**
+- Invalid ISO date format
+- Unrecognized unit parameter
+- Missing required parameters
+
+### Tool: `date_add`
+
+**Parameters:**
+- `date` (string, required): Starting date in ISO format (YYYY-MM-DD)
+- `amount` (integer, required): Amount to add (negative to subtract)
+- `unit` (string, required): Time unit
+  - `days`: Add/subtract days
+  - `weeks`: Add/subtract weeks
+  - `months`: Add/subtract months (handles month-end dates)
+  - `years`: Add/subtract years (handles leap years)
+
+**Response Format:**
+- Original date
+- New date after calculation
+- Formatted calculation string
+
+**Examples:**
+```
+date_add("2025-01-15", 30, "days") → "2025-02-14"
+date_add("2025-01-31", 1, "months") → "2025-02-28" (month-end handling)
+date_add("2024-02-29", 1, "years") → "2025-02-28" (leap year handling)
+date_add("2025-06-15", -90, "days") → "2025-03-17" (subtraction)
+```
+
+**Algorithm:** Uses relativedelta for months/years and timedelta for days/weeks
+
+**Error Handling:**
+- Invalid ISO date format
+- Unrecognized unit parameter
+- Invalid amount type
+- Missing required parameters
+
+### Tool: `business_days`
+
+**Parameters:**
+- `start_date` (string, required): Start date in ISO format (YYYY-MM-DD)
+- `end_date` (string, required): End date in ISO format (YYYY-MM-DD)
+- `exclude_holidays` (array, optional): List of holiday dates in ISO format to exclude
+
+**Response Format:**
+- Business day count (Monday-Friday, excluding holidays)
+- Total calendar days
+- Weekend days count
+- Holidays excluded count
+- Formatted summary
+
+**Examples:**
+```
+business_days("2025-01-06", "2025-01-10") → 5 business days (Mon-Fri)
+business_days("2025-01-04", "2025-01-11") → 6 business days (Sat-Sat, excludes weekends)
+business_days("2025-12-22", "2025-12-26", ["2025-12-25"]) → 3 business days (excluding Christmas)
+```
+
+**Algorithm:** Iterates through date range, counting weekdays and excluding specified holidays
+
+**Error Handling:**
+- Invalid ISO date format
+- Invalid holiday date format
+- Missing required parameters
+
+### Tool: `age_calculator`
+
+**Parameters:**
+- `birthdate` (string, required): Birth date in ISO format (YYYY-MM-DD)
+- `reference_date` (string, optional): Reference date for calculation (default: today)
+
+**Response Format:**
+- Age in years, months, and days
+- Total days lived
+- Formatted age string
+
+**Examples:**
+```
+age_calculator("1990-05-15") → "35 years, 6 months, 4 days old"
+age_calculator("2000-01-01", "2025-01-01") → "25 years, 0 months, 0 days old"
+age_calculator("2020-02-29", "2021-03-01") → "1 year, 0 months, 1 day old"
+```
+
+**Algorithm:** Uses relativedelta for accurate age calculation with leap year support
+
+**Error Handling:**
+- Invalid ISO date format
+- Birthdate in the future
+- Missing required parameters
+
+### Tool: `day_of_week`
+
+**Parameters:**
+- `date` (string, required): Date in ISO format (YYYY-MM-DD)
+
+**Response Format:**
+- Day name (e.g., "Wednesday")
+- ISO week number
+- Day of year (1-366)
+- ISO year
+- Weekend indicator
+- Formatted summary
+
+**Examples:**
+```
+day_of_week("2025-11-19") → "Wednesday, Week 47, Day 323"
+day_of_week("2000-01-01") → "Saturday, Week 52, Day 1"
+day_of_week("2024-12-25") → "Wednesday, Week 52, Day 360"
+```
+
+**Algorithm:** Uses Python's datetime methods to extract calendar information
+
+**Error Handling:**
+- Invalid ISO date format
+- Missing required parameters
+
 ## 📁 Project Structure
 
 ```
@@ -766,7 +920,12 @@ from src.fibonacci_server.server import (
     correlation,
     percentile,
     outliers,
-    unit_convert
+    unit_convert,
+    date_diff,
+    date_add,
+    business_days,
+    age_calculator,
+    day_of_week
 )
 
 # Fibonacci calculations
@@ -812,6 +971,15 @@ print(unit_convert(100, "km", "mi"))  # Output: {'result': 62.137..., 'formatted
 print(unit_convert(75, "F", "C"))  # Output: {'result': 23.89, 'formatted': '75°F = 23.89°C (Formula: (F - 32) × 5/9)', ...}
 print(unit_convert(2, "GB", "MB"))  # Output: {'result': 2048, 'formatted': '2 GB = 2048 MB', ...}
 print(unit_convert(1, "gallon", "liter"))  # Output: {'result': 3.785..., 'formatted': '1 gallon = 3.785 liter', ...}
+
+# Date calculator
+print(date_diff("2025-01-01", "2025-12-31", "days"))  # Output: {'days': 364, 'formatted': '364 days'}
+print(date_diff("2025-01-01", "2025-12-31", "all"))  # Output: {'years': 0, 'months': 11, 'days': 30, ...}
+print(date_add("2025-01-15", 30, "days"))  # Output: {'new_date': '2025-02-14', ...}
+print(date_add("2025-01-31", 1, "months"))  # Output: {'new_date': '2025-02-28', ...}
+print(business_days("2025-01-06", "2025-01-10"))  # Output: {'business_days': 5, ...}
+print(age_calculator("2000-01-01", "2025-01-01"))  # Output: {'years': 25, 'months': 0, 'days': 0, ...}
+print(day_of_week("2000-01-01"))  # Output: {'day_name': 'Saturday', 'week_number': 52, ...}
 ```
 
 ## 🏗️ Architecture
@@ -865,6 +1033,7 @@ Look for messages containing "fibonacci", "prime", or "mcp" to see connection at
 - `mcp>=1.0.0` - Model Context Protocol SDK
 - `pydantic>=2.0.0` - Data validation and settings management
 - `python-dotenv>=1.0.0` - Environment variable management
+- `python-dateutil>=2.8.0` - Date and time calculations with timezone support
 
 All dependencies are automatically installed via `pip install -r requirements.txt`.
 
