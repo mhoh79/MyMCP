@@ -8,6 +8,7 @@ A complete Model Context Protocol (MCP) server implementation in Python that pro
 - **Prime Number Tools**: Check primality, generate primes, find nth prime, and factorize numbers
 - **Number Theory Tools**: GCD, LCM, factorial, combinations, and permutations
 - **Sequence Generators**: Pascal's triangle, triangular numbers, perfect numbers, and Collatz sequences
+- **Cryptographic Hash Generator**: Generate MD5, SHA-1, SHA-256, SHA-512, and BLAKE2b hashes with security notes
 - **High Performance**: Optimized algorithms (Euclidean algorithm, Sieve of Eratosthenes, efficient combinatorics, memoization)
 - **Robust Validation**: Comprehensive error handling and input validation with appropriate ranges
 - **Production Ready**: Full logging, proper error messages, and graceful shutdown
@@ -122,6 +123,17 @@ Once configured, you can interact with the server through Claude:
 "Find all perfect numbers up to 10000"
 "What's the Collatz sequence for 27?"
 ```
+
+### Cryptographic Hash Generator
+```
+"Generate an SHA-256 hash of 'Hello World'"
+"What's the MD5 hash of 'password123'?"
+"Create a SHA-512 hash of my data"
+"Generate a BLAKE2b hash in base64 format"
+"Hash this text using SHA-256"
+```
+
+**⚠️ Security Warning**: MD5 and SHA-1 are cryptographically broken. Use SHA-256 or higher for security purposes. Never use plain hashes for passwords - always use salt and key derivation functions (PBKDF2, bcrypt, Argon2).
 
 ## 🔧 Tool Specifications
 
@@ -406,6 +418,68 @@ Once configured, you can interact with the server through Claude:
 - Out of range values (< 1 or > 100000)
 - Missing required parameters
 
+### Tool: `generate_hash`
+
+**Parameters:**
+- `data` (string, required): Input text or data to hash (max 1MB)
+- `algorithm` (string, required): Hash algorithm to use
+  - `md5`: 128-bit, fast but INSECURE (use only for checksums)
+  - `sha1`: 160-bit, DEPRECATED (avoid for new applications)
+  - `sha256`: 256-bit, SECURE and recommended
+  - `sha512`: 512-bit, HIGH security
+  - `blake2b`: 512-bit, MODERN and fast
+- `output_format` (string, optional, default: "hex"):
+  - `hex`: Hexadecimal output
+  - `base64`: Base64-encoded output
+
+**Response Format:**
+- Hash value in requested format
+- Algorithm and format used
+- Input size in bytes
+- Hash size in bits
+- Security note with recommendations
+
+**Examples:**
+```
+"Hello World" + SHA-256 → "a591a6d40bf420404a011733cfb7b190d62c65bf0bcda32b57b277d9ad9f146e"
+"password123" + MD5 → "482c811da5d5b4bc6d497ffa98491e38"
+"test" + SHA-256 + base64 → "n4bQgYhMfWWaL+qgxVrQFaO/TxsrC4Is0V1sFbDwCgg="
+```
+
+**Security Notes:**
+- **MD5**: ⚠️ BROKEN - collision attacks are practical. Use ONLY for non-security purposes.
+- **SHA-1**: ⚠️ DEPRECATED - collision attacks demonstrated. Avoid for new applications.
+- **SHA-256**: ✓ SECURE - recommended for most security applications.
+- **SHA-512**: ✓ HIGH SECURITY - enhanced security with larger output.
+- **BLAKE2b**: ✓ MODERN - fast and secure, comparable to SHA-3.
+
+**Password Hashing:**
+- ⚠️ NEVER use plain hashes for passwords
+- Always use salt (unique random value per password)
+- Use key derivation functions: PBKDF2, bcrypt, or Argon2
+- Minimum: SHA-256 with salt, better: use bcrypt/Argon2
+
+**Algorithm Characteristics:**
+- MD5: 32 hex chars (128 bits), very fast, INSECURE
+- SHA-1: 40 hex chars (160 bits), fast, DEPRECATED
+- SHA-256: 64 hex chars (256 bits), medium speed, SECURE
+- SHA-512: 128 hex chars (512 bits), slower, HIGH security
+- BLAKE2b: 128 hex chars (512 bits), very fast, MODERN
+
+**Use Cases:**
+- MD5: File checksums, cache keys (non-security only)
+- SHA-1: Git commits (legacy), HMAC in legacy systems
+- SHA-256: Digital signatures, SSL/TLS, Bitcoin, file integrity
+- SHA-512: High-security applications, hash truncation needs
+- BLAKE2b: Modern file integrity, cryptocurrencies (Zcash)
+
+**Error Handling:**
+- Invalid input types
+- Unsupported algorithm
+- Unsupported output format
+- Data size exceeds 1MB limit
+- Missing required parameters
+
 ## 📁 Project Structure
 
 ```
@@ -458,7 +532,8 @@ from src.fibonacci_server.server import (
     pascal_triangle,
     triangular_numbers,
     perfect_numbers,
-    collatz_sequence
+    collatz_sequence,
+    generate_hash
 )
 
 # Fibonacci calculations
@@ -484,6 +559,11 @@ print(triangular_numbers(n=5))  # Output: 15
 print(triangular_numbers(limit=5))  # Output: [1, 3, 6, 10, 15]
 print(perfect_numbers(100))  # Output: [6, 28]
 print(collatz_sequence(13))  # Output: {'sequence': [13, 40, 20, 10, 5, 16, 8, 4, 2, 1], 'steps': 9, 'max_value': 40}
+
+# Cryptographic hash generator
+print(generate_hash("Hello World", "sha256", "hex"))  # Output: {'hash': 'a591a6d40bf420404a011733cfb7b190d62c65bf0bcda32b57b277d9ad9f146e', ...}
+print(generate_hash("password123", "md5", "hex"))  # Output: {'hash': '482c811da5d5b4bc6d497ffa98491e38', ...}
+print(generate_hash("test", "sha512", "base64"))  # Output: Base64-encoded SHA-512 hash
 ```
 
 ## 🏗️ Architecture
@@ -607,6 +687,12 @@ Example verifications:
 
 - Request: "What's the Collatz sequence for 13?"
 - Expected: `[13, 40, 20, 10, 5, 16, 8, 4, 2, 1]` (9 steps)
+
+- Request: "Generate an SHA-256 hash of 'Hello World'"
+- Expected: `a591a6d40bf420404a011733cfb7b190d62c65bf0bcda32b57b277d9ad9f146e`
+
+- Request: "What's the MD5 hash of 'password123'?"
+- Expected: `482c811da5d5b4bc6d497ffa98491e38` (with security warning about MD5)
 
 ## 📄 License
 
