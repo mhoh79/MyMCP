@@ -725,8 +725,7 @@ def detect_trend(data: list[float], timestamps: list[float] = None, method: str 
     # Handle polynomial method (not fully implemented, fall back to linear)
     if method == "polynomial":
         # Log a warning and use linear instead
-        import logging
-        logging.warning(f"Polynomial regression not implemented, using linear regression instead")
+        logger.warning(f"Polynomial regression not implemented, using linear regression instead")
         method = "linear"
     
     if method == "linear":
@@ -997,9 +996,6 @@ def change_point_detection(data: list[float], method: str = "cusum", threshold: 
         window_size = max(min_size, len(data) // 10)
         
         for i in range(window_size, len(data) - window_size, window_size // 2):
-            if i - window_size < 0:
-                continue
-            
             # Calculate std for before and after windows
             before = data[max(0, i - window_size):i]
             after = data[i:min(len(data), i + window_size)]
