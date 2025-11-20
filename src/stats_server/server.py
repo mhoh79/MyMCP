@@ -13,6 +13,13 @@ import math
 import numpy as np
 from scipy import stats
 
+# Optional sklearn import for isolation forest
+try:
+    from sklearn.ensemble import IsolationForest
+    SKLEARN_AVAILABLE = True
+except ImportError:
+    SKLEARN_AVAILABLE = False
+
 # MCP SDK imports for building the server
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
@@ -31,6 +38,14 @@ logging.basicConfig(
     handlers=[logging.StreamHandler()],  # Logs go to stderr by default
 )
 logger = logging.getLogger("stats-server")
+
+
+# ============================================================================
+# Constants
+# ============================================================================
+
+# Small epsilon value to prevent division by zero in statistical calculations
+EPSILON = 1e-10
 
 
 # ============================================================================
@@ -593,7 +608,7 @@ def z_score_detection(data: list[float], method: str = "modified", threshold: fl
         variance = sum((x - mean_val) ** 2 for x in data) / len(data)
         std_val = variance ** 0.5
         
-        if std_val < 1e-10:
+        if std_val < EPSILON:
             std_val = 1.0  # Prevent division by zero
         
         for i, value in enumerate(data):
@@ -642,7 +657,7 @@ def z_score_detection(data: list[float], method: str = "modified", threshold: fl
         else:
             mad = sorted_dev[len(sorted_dev) // 2]
         
-        if mad < 1e-10:
+        if mad < EPSILON:
             mad = 1.0  # Prevent division by zero
         
         for i, value in enumerate(data):
@@ -744,7 +759,7 @@ def grubbs_test(data: list[float], alpha: float = 0.05, method: str = "two_sided
     variance = sum((x - mean_val) ** 2 for x in data) / n
     std_val = variance ** 0.5
     
-    if std_val < 1e-10:
+    if std_val < EPSILON:
         raise ValueError("Cannot perform Grubbs test: data has zero variance")
     
     # Find suspected outlier based on method
@@ -804,8 +819,9 @@ def grubbs_test(data: list[float], alpha: float = 0.05, method: str = "two_sided
             t_stat = math.sqrt((n - 2) * test_statistic**2 / ((n - 1)**2 - n * test_statistic**2))
             p_value = 2 * n * (1 - stats.t.cdf(t_stat, n - 2))
             p_value = min(p_value, 1.0)
-        except:
-            p_value = 0.001  # Very significant
+        except (ValueError, ZeroDivisionError, RuntimeError):
+            # If calculation fails (e.g., denominator near zero), assume very significant
+            p_value = 0.001
     
     # Determine conclusion
     if test_statistic > critical_value:
@@ -901,7 +917,7 @@ def dixon_q_test(data: list[float], alpha: float = 0.05) -> dict[str, Any]:
     # Q = gap / range
     range_val = sorted_data[-1] - sorted_data[0]
     
-    if range_val < 1e-10:
+    if range_val < EPSILON:
         raise ValueError("Cannot perform Dixon Q test: all values are identical")
     
     # Check low end
@@ -998,13 +1014,11 @@ def isolation_forest(data: list, contamination: float = 0.1, n_estimators: int =
             X = np.array(data)
             if X.ndim != 2:
                 raise ValueError("Multivariate data must be 2-dimensional")
-    except Exception as e:
+    except (TypeError, IndexError, ValueError) as e:
         raise ValueError(f"Failed to convert data to array: {str(e)}")
     
-    # Import sklearn isolation forest
-    try:
-        from sklearn.ensemble import IsolationForest
-    except ImportError:
+    # Check if sklearn is available
+    if not SKLEARN_AVAILABLE:
         raise ImportError("sklearn is required for isolation_forest. Install with: pip install scikit-learn")
     
     # Fit isolation forest
@@ -1087,7 +1101,7 @@ def mahalanobis_distance(data: list[list[float]], threshold: float = 0.975) -> d
         X = np.array(data)
         if X.ndim != 2:
             raise ValueError("Data must be 2-dimensional (multivariate)")
-    except Exception as e:
+    except (TypeError, ValueError) as e:
         raise ValueError(f"Failed to convert data to array: {str(e)}")
     
     n_samples, n_features = X.shape
@@ -1220,7 +1234,7 @@ def streaming_outlier_detection(current_value: float, historical_window: list[fl
     variance_hist = sum((x - mean_hist) ** 2 for x in historical_window) / len(historical_window)
     std_hist = variance_hist ** 0.5
     
-    if std_hist < 1e-10:
+    if std_hist < EPSILON:
         std_hist = 1.0
     
     # Map sensitivity to threshold (inverse relationship)
@@ -1287,11 +1301,11 @@ def streaming_outlier_detection(current_value: float, historical_window: list[fl
         recent_variance = sum((x - recent_mean) ** 2 for x in recent_window) / len(recent_window)
         recent_std = recent_variance ** 0.5
         
-        if recent_std < 1e-10:
+        if recent_std < EPSILON:
             recent_std = 1.0
         
         # Adaptive threshold adjusts based on recent volatility
-        adaptive_factor = recent_std / std_hist if std_hist > 1e-10 else 1.0
+        adaptive_factor = recent_std / std_hist if std_hist > EPSILON else 1.0
         adjusted_threshold = base_threshold * adaptive_factor
         
         expected_range = [recent_mean - adjusted_threshold * recent_std, 
@@ -1558,7 +1572,7 @@ def detect_trend(data: list[float], timestamps: list[float] = None, method: str 
         
         # Calculate slope (m) and intercept (b)
         denominator = n * sum_xx - sum_x ** 2
-        if abs(denominator) < 1e-10:
+        if abs(denominator) < EPSILON:
             raise ValueError("Cannot perform linear regression: timestamps have no variance")
         
         slope = (n * sum_xy - sum_x * sum_y) / denominator
@@ -1575,7 +1589,7 @@ def detect_trend(data: list[float], timestamps: list[float] = None, method: str 
         ss_tot = sum((yi - mean_y) ** 2 for yi in y)
         ss_res = sum((yi - pred) ** 2 for yi, pred in zip(y, predictions))
         
-        if ss_tot < 1e-10:
+        if ss_tot < EPSILON:
             r_squared = 1.0  # Perfect fit if no variance
         else:
             r_squared = 1 - (ss_res / ss_tot)
@@ -1593,7 +1607,7 @@ def detect_trend(data: list[float], timestamps: list[float] = None, method: str 
         # Calculate confidence interval (simplified)
         # Standard error of slope
         variance_x = sum_xx - sum_x ** 2 / n
-        if n > 2 and variance_x > 1e-10:
+        if n > 2 and variance_x > EPSILON:
             se_slope = (ss_res / (n - 2)) ** 0.5 / (variance_x ** 0.5)
         else:
             se_slope = 0
@@ -1684,7 +1698,7 @@ def autocorrelation(data: list[float], max_lag: int = None) -> dict[str, Any]:
     mean = sum(data) / n
     variance = sum((x - mean) ** 2 for x in data) / n
     
-    if variance < 1e-10:
+    if variance < EPSILON:
         raise ValueError("Cannot calculate autocorrelation: data has zero variance")
     
     # Calculate autocorrelation for each lag
@@ -1789,7 +1803,7 @@ def change_point_detection(data: list[float], method: str = "cusum", threshold: 
         mean_val = sum(data) / len(data)
         std_val = (sum((x - mean_val) ** 2 for x in data) / len(data)) ** 0.5
         
-        if std_val < 1e-10:
+        if std_val < EPSILON:
             std_val = 1.0  # Prevent division by zero
         
         # Calculate CUSUM
@@ -1829,7 +1843,7 @@ def change_point_detection(data: list[float], method: str = "cusum", threshold: 
                 
                 # Check for significant change in mean or std
                 avg_std = (std_before + std_after) / 2
-                if std_before > 1e-10 and std_after > 1e-10 and avg_std > 1e-10:
+                if std_before > EPSILON and std_after > EPSILON and avg_std > EPSILON:
                     mean_change = abs(mean_after - mean_before) / avg_std
                     std_ratio = max(std_after / std_before, std_before / std_after)
                     
@@ -1851,7 +1865,7 @@ def change_point_detection(data: list[float], method: str = "cusum", threshold: 
                 mean_after = sum(after) / len(after)
                 std_before = (sum((x - mean_before) ** 2 for x in before) / len(before)) ** 0.5
                 
-                if std_before < 1e-10:
+                if std_before < EPSILON:
                     std_before = 1.0
                 
                 # Detect significant mean shift
