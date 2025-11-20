@@ -8,6 +8,7 @@ A complete Model Context Protocol (MCP) server implementation in Python that pro
 - **Prime Number Tools**: Check primality, generate primes, find nth prime, and factorize numbers
 - **Number Theory Tools**: GCD, LCM, factorial, combinations, and permutations
 - **Sequence Generators**: Pascal's triangle, triangular numbers, perfect numbers, and Collatz sequences
+- **Statistical Analysis**: Descriptive statistics, correlation analysis, percentile calculations, and outlier detection
 - **Cryptographic Hash Generator**: Generate MD5, SHA-1, SHA-256, SHA-512, and BLAKE2b hashes with security notes
 - **High Performance**: Optimized algorithms (Euclidean algorithm, Sieve of Eratosthenes, efficient combinatorics, memoization)
 - **Robust Validation**: Comprehensive error handling and input validation with appropriate ranges
@@ -134,6 +135,15 @@ Once configured, you can interact with the server through Claude:
 ```
 
 **⚠️ Security Warning**: MD5 and SHA-1 are cryptographically broken. Use SHA-256 or higher for security purposes. Never use plain hashes for passwords - always use salt and key derivation functions (PBKDF2, bcrypt, Argon2).
+
+### Statistical Analysis
+```
+"Analyze this data: [23, 45, 12, 67, 34, 89, 23, 56]"
+"What's the correlation between [1, 2, 3, 4, 5] and [2, 4, 6, 8, 10]?"
+"Find the 75th percentile of [10, 20, 30, 40, 50]"
+"Identify outliers in [10, 12, 14, 13, 15, 100, 11, 13, 14]"
+"Calculate mean and standard deviation for my dataset"
+```
 
 ## 🔧 Tool Specifications
 
@@ -480,6 +490,138 @@ Once configured, you can interact with the server through Claude:
 - Data size exceeds 1MB limit
 - Missing required parameters
 
+### Tool: `descriptive_stats`
+
+**Parameters:**
+- `data` (array of numbers, required): Dataset to analyze (1-10000 items)
+
+**Response Format:**
+- `mean`: Arithmetic average (μ = Σx / n)
+- `median`: Middle value when sorted
+- `mode`: Most frequent value(s)
+- `range`: Difference between max and min
+- `variance`: Average of squared deviations (σ² = Σ(x - μ)² / n)
+- `std_dev`: Square root of variance (σ)
+- `count`: Number of data points
+- `min`: Minimum value
+- `max`: Maximum value
+
+**Examples:**
+```
+[23, 45, 12, 67, 34, 89, 23, 56] → mean: 43.625, median: 39.5, mode: 23, std_dev: 24.25
+[1, 2, 3, 4, 5] → mean: 3.0, median: 3, variance: 2.0
+```
+
+**Algorithm:** Uses pure Python calculations with O(n log n) complexity for sorting (median)
+
+**Error Handling:**
+- Empty or invalid data
+- Non-numeric values
+- Data size out of range
+
+### Tool: `correlation`
+
+**Parameters:**
+- `x` (array of numbers, required): First dataset (2-1000 items)
+- `y` (array of numbers, required): Second dataset (must be same length as x)
+
+**Response Format:**
+- `coefficient`: Pearson correlation coefficient (r, range: -1 to 1)
+- `interpretation`: Human-readable interpretation
+
+**Formula:** r = Σ[(x - x̄)(y - ȳ)] / √[Σ(x - x̄)² × Σ(y - ȳ)²]
+
+**Interpretation:**
+- r = 1.0: Perfect positive correlation
+- 0.7 ≤ r < 1.0: Strong positive correlation
+- 0.4 ≤ r < 0.7: Moderate positive correlation
+- -0.1 < r < 0.1: No correlation
+- -1.0 < r ≤ -0.7: Strong negative correlation
+- r = -1.0: Perfect negative correlation
+
+**Examples:**
+```
+[1, 2, 3, 4, 5] and [2, 4, 6, 8, 10] → r = 1.0 (perfect positive)
+[1, 2, 3, 4, 5] and [5, 4, 3, 2, 1] → r = -1.0 (perfect negative)
+```
+
+**Algorithm:** Calculates covariance and standard deviations in O(n) time
+
+**Error Handling:**
+- Arrays of different lengths
+- Non-numeric values
+- Zero variance (all values identical)
+- Array size out of range
+
+### Tool: `percentile`
+
+**Parameters:**
+- `data` (array of numbers, required): Dataset (1-10000 items)
+- `percentile` (number, required): Percentile to calculate (0-100)
+
+**Response Format:**
+- Numeric value at the specified percentile
+
+**Formula:** Uses linear interpolation method:
+- k = (p / 100) × (n - 1)
+- If k is integer, return data[k]
+- Otherwise, interpolate between floor(k) and ceil(k)
+
+**Special Percentiles:**
+- 0th: Minimum value
+- 25th: First quartile (Q1)
+- 50th: Median (Q2)
+- 75th: Third quartile (Q3)
+- 100th: Maximum value
+
+**Examples:**
+```
+[15, 20, 35, 40, 50], 50th → 35 (median)
+[1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 90th → 9.1
+```
+
+**Algorithm:** Sorts data and uses linear interpolation, O(n log n) complexity
+
+**Error Handling:**
+- Invalid percentile value (outside 0-100)
+- Non-numeric data
+- Empty dataset
+
+### Tool: `outliers`
+
+**Parameters:**
+- `data` (array of numbers, required): Dataset to analyze (1-10000 items)
+
+**Response Format:**
+- `outliers`: List of outlier values
+- `indices`: Indices of outliers in original data
+- `count`: Number of outliers
+- `lower_bound`: Lower threshold (Q1 - 1.5×IQR)
+- `upper_bound`: Upper threshold (Q3 + 1.5×IQR)
+- `q1`: First quartile (25th percentile)
+- `q3`: Third quartile (75th percentile)
+- `iqr`: Interquartile range (Q3 - Q1)
+
+**Method:** IQR (Interquartile Range) method
+- Calculate Q1 and Q3
+- IQR = Q3 - Q1
+- Lower bound = Q1 - 1.5 × IQR
+- Upper bound = Q3 + 1.5 × IQR
+- Values outside [lower_bound, upper_bound] are outliers
+
+**Examples:**
+```
+[10, 12, 14, 13, 15, 100, 11, 13, 14] → outliers: [100], count: 1
+[10, 11, 12, 13, 14, 15] → outliers: [], count: 0 (no outliers)
+```
+
+**Algorithm:** Uses percentile calculations with O(n log n) complexity
+
+**Error Handling:**
+- Non-numeric values
+- Empty dataset
+- Data size out of range
+
 ## 📁 Project Structure
 
 ```
@@ -533,7 +675,11 @@ from src.fibonacci_server.server import (
     triangular_numbers,
     perfect_numbers,
     collatz_sequence,
-    generate_hash
+    generate_hash,
+    descriptive_stats,
+    correlation,
+    percentile,
+    outliers
 )
 
 # Fibonacci calculations
@@ -564,6 +710,15 @@ print(collatz_sequence(13))  # Output: {'sequence': [13, 40, 20, 10, 5, 16, 8, 4
 print(generate_hash("Hello World", "sha256", "hex"))  # Output: {'hash': 'a591a6d40bf420404a011733cfb7b190d62c65bf0bcda32b57b277d9ad9f146e', ...}
 print(generate_hash("password123", "md5", "hex"))  # Output: {'hash': '482c811da5d5b4bc6d497ffa98491e38', ...}
 print(generate_hash("test", "sha512", "base64"))  # Output: Base64-encoded SHA-512 hash
+
+# Statistical analysis tools
+print(descriptive_stats([23, 45, 12, 67, 34, 89, 23, 56]))  
+# Output: {'mean': 43.625, 'median': 39.5, 'mode': [23], 'range': 77, 'variance': 587.98, 'std_dev': 24.25, ...}
+print(correlation([1, 2, 3, 4, 5], [2, 4, 6, 8, 10]))  
+# Output: {'coefficient': 1.0, 'interpretation': 'Perfect positive correlation'}
+print(percentile([23, 45, 12, 67, 34, 89, 23, 56], 50))  # Output: 39.5 (median)
+print(outliers([10, 12, 14, 13, 15, 100, 11, 13, 14]))  
+# Output: {'outliers': [100], 'indices': [5], 'count': 1, 'q1': 12.0, 'q3': 14.0, 'iqr': 2.0, ...}
 ```
 
 ## 🏗️ Architecture
@@ -694,6 +849,18 @@ Example verifications:
 - Request: "What's the MD5 hash of 'password123'?"
 - Expected: `482c811da5d5b4bc6d497ffa98491e38` (with security warning about MD5)
 
+- Request: "Analyze this data: [23, 45, 12, 67, 34, 89, 23, 56]"
+- Expected: Mean: 43.625, Median: 39.5, Mode: 23, Std Dev: ~24.25
+
+- Request: "What's the correlation between [1, 2, 3, 4, 5] and [2, 4, 6, 8, 10]?"
+- Expected: r = 1.0 (Perfect positive correlation)
+
+- Request: "Find the 75th percentile of [23, 45, 12, 67, 34, 89, 23, 56]"
+- Expected: 58.75
+
+- Request: "Identify outliers in [10, 12, 14, 13, 15, 100, 11, 13, 14]"
+- Expected: Outliers: [100], Count: 1
+
 ## 📄 License
 
 MIT
@@ -715,7 +882,9 @@ This project demonstrates:
   - Number theory algorithms (Euclidean algorithm for GCD)
   - Combinatorics (efficient computation of combinations and permutations)
   - Sequence generators (Pascal's triangle with memoization, triangular numbers, perfect numbers, Collatz conjecture)
+  - Statistical analysis (descriptive statistics, Pearson correlation, percentile calculation, outlier detection using IQR method)
 - Mathematical computation and number theory
+- Pure Python implementations without external numerical libraries
 
 ---
 
