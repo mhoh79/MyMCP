@@ -1386,11 +1386,11 @@ def fft_analysis(signal_data: list[float], sample_rate: float, window: str = "ha
     
     # Apply window function to reduce spectral leakage
     if window == "hanning":
-        window_func = np.hanning(n)
+        window_func = scipy_signal.windows.hann(n)
     elif window == "hamming":
-        window_func = np.hamming(n)
+        window_func = scipy_signal.windows.hamming(n)
     elif window == "blackman":
-        window_func = np.blackman(n)
+        window_func = scipy_signal.windows.blackman(n)
     else:  # rectangular
         window_func = np.ones(n)
     
