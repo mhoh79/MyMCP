@@ -1466,7 +1466,9 @@ def _calculate_xbar_limits(data: list[float], subgroup_size: int, sigma_level: f
     if subgroup_size in CONTROL_CHART_CONSTANTS:
         A2, _, _, _, _ = CONTROL_CHART_CONSTANTS[subgroup_size]
     else:
-        # Approximate for sizes > 25
+        # Approximate for sizes > 25 using Central Limit Theorem
+        # As n increases, the standard error approaches sigma/sqrt(n)
+        # and 3-sigma limits approach 3*sigma/sqrt(n)
         A2 = 3 / (subgroup_size ** 0.5)
     
     # Calculate control limits: X-bar ± A2 * R-bar
@@ -1891,11 +1893,14 @@ def process_capability(
     cpk = min(cpu, cpl)
     
     # Calculate Pp (overall performance, using total variation)
-    # For simplicity, Pp ≈ Cp (in practice, Pp uses long-term sigma)
-    pp = cp  # Simplified
+    # Note: In practice, Pp uses long-term sigma (between-subgroup variation) while Cp uses
+    # within-subgroup variation. For individual measurements without subgroups, Pp ≈ Cp.
+    # This implementation uses sample standard deviation which is appropriate for this case.
+    pp = cp  # Simplified for individual measurements
     
     # Calculate Ppk (overall performance with centering)
-    ppk = cpk  # Simplified
+    # Note: Ppk uses long-term sigma like Pp. For individual measurements, Ppk ≈ Cpk.
+    ppk = cpk  # Simplified for individual measurements
     
     # Interpret Cp
     if cp >= 2.0:
@@ -2345,7 +2350,7 @@ def cusum_chart(
         mean = sum(data) / len(data)
         sigma = (sum((x - mean) ** 2 for x in data) / len(data)) ** 0.5
         if sigma < 1e-10:
-            sigma = 1.0  # Prevent division by zero
+            raise ValueError("Cannot calculate CUSUM: data has zero or near-zero variation")
     else:
         if not isinstance(sigma, (int, float)):
             raise ValueError(f"sigma must be numeric, got {type(sigma).__name__}")
