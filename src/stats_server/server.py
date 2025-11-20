@@ -604,8 +604,10 @@ def z_score_detection(data: list[float], method: str = "modified", threshold: fl
     
     if method == "standard":
         # Standard Z-score: (x - mean) / std
-        mean_val = sum(data) / len(data)
-        variance = sum((x - mean_val) ** 2 for x in data) / len(data)
+        # Using sample standard deviation (n-1) for unbiased estimate
+        n = len(data)
+        mean_val = sum(data) / n
+        variance = sum((x - mean_val) ** 2 for x in data) / (n - 1) if n > 1 else 0
         std_val = variance ** 0.5
         
         if std_val < EPSILON:
@@ -756,7 +758,8 @@ def grubbs_test(data: list[float], alpha: float = 0.05, method: str = "two_sided
     
     n = len(data)
     mean_val = sum(data) / n
-    variance = sum((x - mean_val) ** 2 for x in data) / n
+    # Use sample standard deviation (n-1) for unbiased estimate in Grubbs test
+    variance = sum((x - mean_val) ** 2 for x in data) / (n - 1)
     std_val = variance ** 0.5
     
     if std_val < EPSILON:
@@ -1229,9 +1232,10 @@ def streaming_outlier_detection(current_value: float, historical_window: list[fl
     if sensitivity < 1 or sensitivity > 10:
         raise ValueError(f"sensitivity must be between 1 and 10, got {sensitivity}")
     
-    # Calculate baseline statistics
-    mean_hist = sum(historical_window) / len(historical_window)
-    variance_hist = sum((x - mean_hist) ** 2 for x in historical_window) / len(historical_window)
+    # Calculate baseline statistics using sample variance
+    n_hist = len(historical_window)
+    mean_hist = sum(historical_window) / n_hist
+    variance_hist = sum((x - mean_hist) ** 2 for x in historical_window) / (n_hist - 1) if n_hist > 1 else 0
     std_hist = variance_hist ** 0.5
     
     if std_hist < EPSILON:
@@ -1297,8 +1301,9 @@ def streaming_outlier_detection(current_value: float, historical_window: list[fl
     else:  # adaptive_threshold
         # Adaptive threshold based on recent behavior
         recent_window = historical_window[-min(20, len(historical_window)):]
-        recent_mean = sum(recent_window) / len(recent_window)
-        recent_variance = sum((x - recent_mean) ** 2 for x in recent_window) / len(recent_window)
+        n_recent = len(recent_window)
+        recent_mean = sum(recent_window) / n_recent
+        recent_variance = sum((x - recent_mean) ** 2 for x in recent_window) / (n_recent - 1) if n_recent > 1 else 0
         recent_std = recent_variance ** 0.5
         
         if recent_std < EPSILON:
