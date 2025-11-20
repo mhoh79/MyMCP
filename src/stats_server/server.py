@@ -20,6 +20,19 @@ from mcp.types import (
     INTERNAL_ERROR,
 )
 
+# Configure logging to stderr (stdout is reserved for MCP protocol messages)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[logging.StreamHandler()],  # Logs go to stderr by default
+)
+logger = logging.getLogger("stats-server")
+
+# Constants for numerical calculations and validation
+NUMERICAL_TOLERANCE = 1e-10  # Tolerance for numerical comparisons and singularity checks
+MIN_CONFIDENCE_LEVEL = 0.8  # Minimum confidence level for statistical inference
+MAX_CONFIDENCE_LEVEL = 0.999  # Maximum confidence level for statistical inference
+
 # SciPy imports for statistical tests
 try:
     from scipy import stats as scipy_stats
@@ -28,14 +41,6 @@ try:
 except ImportError:
     SCIPY_AVAILABLE = False
     logger.warning("SciPy not available. Some advanced statistical tests will be unavailable.")
-
-# Configure logging to stderr (stdout is reserved for MCP protocol messages)
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    handlers=[logging.StreamHandler()],  # Logs go to stderr by default
-)
-logger = logging.getLogger("stats-server")
 
 
 # ============================================================================
@@ -748,7 +753,7 @@ def detect_trend(data: list[float], timestamps: list[float] = None, method: str 
         
         # Calculate slope (m) and intercept (b)
         denominator = n * sum_xx - sum_x ** 2
-        if abs(denominator) < 1e-10:
+        if abs(denominator) < NUMERICAL_TOLERANCE:
             raise ValueError("Cannot perform linear regression: timestamps have no variance")
         
         slope = (n * sum_xy - sum_x * sum_y) / denominator
@@ -1361,8 +1366,8 @@ def linear_regression(x: Any, y: list[float], confidence_level: float = 0.95, in
     if not isinstance(confidence_level, (int, float)):
         raise ValueError(f"confidence_level must be numeric, got {type(confidence_level).__name__}")
     
-    if confidence_level < 0.8 or confidence_level > 0.999:
-        raise ValueError(f"confidence_level must be between 0.8 and 0.999, got {confidence_level}")
+    if confidence_level < MIN_CONFIDENCE_LEVEL or confidence_level > MAX_CONFIDENCE_LEVEL:
+        raise ValueError(f"confidence_level must be between {MIN_CONFIDENCE_LEVEL} and {MAX_CONFIDENCE_LEVEL}, got {confidence_level}")
     
     # Determine if simple or multiple regression
     is_multiple = isinstance(x, list) and len(x) > 0 and isinstance(x[0], list)
@@ -1575,7 +1580,7 @@ def solve_linear_system(A: list[list[float]], b: list[float]) -> list[float]:
         aug[i], aug[max_row] = aug[max_row], aug[i]
         
         # Check for singular matrix
-        if abs(aug[i][i]) < 1e-10:
+        if abs(aug[i][i]) < NUMERICAL_TOLERANCE:
             raise ValueError("Matrix is singular or near-singular")
         
         # Eliminate column
@@ -2072,7 +2077,7 @@ def prediction_with_intervals(model: dict, x_new: list[float], confidence_level:
         pi_upper = pred_y + pi_margin
         
         x_val = xi if not isinstance(xi, list) else xi
-        interpretation = f"At x={x_val}, predicted y is {pred_y:.2f} (95% CI: {ci_lower:.2f}-{ci_upper:.2f})"
+        interpretation = f"At x={x_val}, predicted y is {pred_y:.2f} ({confidence_level*100:.0f}% CI: {ci_lower:.2f}-{ci_upper:.2f})"
         
         predictions.append({
             "x": x_val,
@@ -2121,6 +2126,12 @@ def multivariate_regression(X: list[list[float]], y: list[float], variable_names
         
     Returns:
         Dictionary containing coefficients, statistics, variable importance, VIF, and interpretation
+        
+    Note:
+        P-value calculations use an approximate standard error (SE ≈ RMSE/√n) which is simplified.
+        For more accurate p-values, consider using dedicated statistical packages that compute
+        the full covariance matrix (X'X)^-1. The provided p-values should be used as rough
+        indicators of significance, not for formal hypothesis testing.
     """
     # Validate inputs
     if not isinstance(X, list) or not isinstance(y, list):
@@ -2682,9 +2693,9 @@ async def list_tools() -> list[Tool]:
                     },
                     "confidence_level": {
                         "type": "number",
-                        "description": "Confidence level for intervals (0.8-0.999)",
-                        "minimum": 0.8,
-                        "maximum": 0.999,
+                        "description": f"Confidence level for intervals ({MIN_CONFIDENCE_LEVEL}-{MAX_CONFIDENCE_LEVEL})",
+                        "minimum": MIN_CONFIDENCE_LEVEL,
+                        "maximum": MAX_CONFIDENCE_LEVEL,
                         "default": 0.95
                     },
                     "include_diagnostics": {
