@@ -332,6 +332,296 @@ def prime_factorization(n: int) -> list[list[int]]:
 
 
 # ============================================================================
+# Sequence Generator Functions
+# ============================================================================
+
+
+# Memoization cache for Pascal's triangle to improve performance
+_pascal_cache: dict[int, list[list[int]]] = {}
+
+
+def pascal_triangle(rows: int) -> list[list[int]]:
+    """
+    Generate Pascal's triangle up to n rows with memoization.
+    
+    Pascal's triangle is a triangular array where each number is the sum of the
+    two numbers directly above it. The triangle starts with 1 at the top, and
+    each row begins and ends with 1.
+    
+    Args:
+        rows: Number of rows to generate (1-30)
+        
+    Returns:
+        2D array representing Pascal's triangle, where each inner list is a row
+        
+    Raises:
+        ValueError: If rows is less than 1 or greater than 30
+        
+    Examples:
+        pascal_triangle(1) = [[1]]
+        pascal_triangle(3) = [[1], [1, 1], [1, 2, 1]]
+        pascal_triangle(5) = [[1], [1, 1], [1, 2, 1], [1, 3, 3, 1], [1, 4, 6, 4, 1]]
+        
+    Mathematical Background:
+        - Each entry is a binomial coefficient C(n,k)
+        - Entry in row n, position k is: C(n,k) = n! / (k! × (n-k)!)
+        - Used in probability, combinatorics, and algebra
+        - The sum of row n equals 2^n
+        
+    Algorithm Explanation:
+        1. Start with row 0: [1]
+        2. For each new row:
+           a. Start and end with 1
+           b. Each interior element is the sum of two elements from previous row
+        3. Use memoization to avoid recalculating previously computed rows
+        
+    Time Complexity: O(rows²) without memoization, O(new_rows²) with memoization
+    Space Complexity: O(rows²) for storing the triangle
+    """
+    if rows < 1 or rows > 30:
+        raise ValueError("Number of rows must be between 1 and 30")
+    
+    # Check cache for previously computed results
+    if rows in _pascal_cache:
+        return _pascal_cache[rows]
+    
+    # Initialize the triangle with the first row
+    triangle = [[1]]
+    
+    # Generate each subsequent row
+    for i in range(1, rows):
+        # Each row starts with 1
+        row = [1]
+        
+        # Calculate interior elements by summing pairs from previous row
+        prev_row = triangle[i - 1]
+        for j in range(len(prev_row) - 1):
+            row.append(prev_row[j] + prev_row[j + 1])
+        
+        # Each row ends with 1
+        row.append(1)
+        triangle.append(row)
+    
+    # Cache the result for future use
+    _pascal_cache[rows] = triangle
+    
+    return triangle
+
+
+def triangular_numbers(n: int = None, limit: int = None) -> int | list[int]:
+    """
+    Generate or calculate triangular numbers.
+    
+    Triangular numbers represent the number of dots that can form an equilateral
+    triangle. They follow the pattern: 1, 3, 6, 10, 15, 21, ...
+    
+    Args:
+        n: Position of triangular number to calculate (1-1000), mutually exclusive with limit
+        limit: Generate sequence up to this many numbers, mutually exclusive with n
+        
+    Returns:
+        If n is provided: the nth triangular number (integer)
+        If limit is provided: sequence of first 'limit' triangular numbers (list)
+        
+    Raises:
+        ValueError: If neither or both n and limit are provided
+        ValueError: If n or limit is out of valid range
+        
+    Examples:
+        triangular_numbers(n=5) = 15
+        triangular_numbers(n=10) = 55
+        triangular_numbers(limit=5) = [1, 3, 6, 10, 15]
+        triangular_numbers(limit=10) = [1, 3, 6, 10, 15, 21, 28, 36, 45, 55]
+        
+    Formula: T(n) = n × (n + 1) / 2
+    
+    Mathematical Background:
+        - Also equals the sum of first n natural numbers: 1 + 2 + 3 + ... + n
+        - Can be visualized as triangular arrangements of dots
+        - Used in combinatorics and number theory
+        - The sequence appears in many mathematical contexts
+        
+    Algorithm Explanation:
+        1. For single value: Use direct formula T(n) = n × (n + 1) / 2
+        2. For sequence: Calculate each term iteratively for efficiency
+        3. Iterative approach avoids redundant calculations
+        
+    Time Complexity: O(1) for single value, O(limit) for sequence
+    Space Complexity: O(1) for single value, O(limit) for sequence
+    """
+    # Validate that exactly one parameter is provided
+    if n is None and limit is None:
+        raise ValueError("Either 'n' or 'limit' must be provided")
+    
+    if n is not None and limit is not None:
+        raise ValueError("Cannot provide both 'n' and 'limit', use only one")
+    
+    # Calculate single triangular number
+    if n is not None:
+        if n < 1 or n > 1000:
+            raise ValueError("n must be between 1 and 1000")
+        
+        # T(n) = n × (n + 1) / 2
+        return n * (n + 1) // 2
+    
+    # Generate sequence of triangular numbers
+    if limit < 1 or limit > 1000:
+        raise ValueError("limit must be between 1 and 1000")
+    
+    sequence = []
+    for i in range(1, limit + 1):
+        sequence.append(i * (i + 1) // 2)
+    
+    return sequence
+
+
+def perfect_numbers(limit: int) -> list[int]:
+    """
+    Find all perfect numbers up to a given limit.
+    
+    A perfect number is a positive integer that equals the sum of its proper
+    divisors (divisors excluding the number itself). For example, 6 = 1 + 2 + 3.
+    Perfect numbers are extremely rare.
+    
+    Args:
+        limit: Upper bound for searching perfect numbers (1-10000)
+        
+    Returns:
+        List of all perfect numbers up to and including the limit
+        
+    Raises:
+        ValueError: If limit is less than 1 or greater than 10000
+        
+    Examples:
+        perfect_numbers(10) = [6]
+        perfect_numbers(30) = [6, 28]
+        perfect_numbers(10000) = [6, 28, 496, 8128]
+        
+    Mathematical Background:
+        - First discovered by ancient Greek mathematicians
+        - Only 51 perfect numbers are known (as of 2024)
+        - All known perfect numbers are even (odd perfect numbers unknown)
+        - Related to Mersenne primes via Euclid-Euler theorem
+        - Form: 2^(p-1) × (2^p - 1) where 2^p - 1 is a Mersenne prime
+        
+    Known perfect numbers:
+        - 6 = 1 + 2 + 3
+        - 28 = 1 + 2 + 4 + 7 + 14
+        - 496 = 1 + 2 + 4 + 8 + 16 + 31 + 62 + 124 + 248
+        - 8128 = sum of its proper divisors
+        - Next one is 33,550,336 (outside typical limits)
+        
+    Algorithm Explanation:
+        1. For each number n from 2 to limit:
+           a. Find all divisors up to n/2 (proper divisors)
+           b. Sum the divisors
+           c. If sum equals n, it's a perfect number
+        2. Optimization: Only check divisors up to sqrt(n)
+        
+    Time Complexity: O(limit × sqrt(limit)) with optimization
+    Space Complexity: O(k) where k is the count of perfect numbers found
+    """
+    if limit < 1 or limit > 10000:
+        raise ValueError("limit must be between 1 and 10000")
+    
+    perfect = []
+    
+    # Check each number from 2 to limit
+    for n in range(2, limit + 1):
+        # Calculate sum of proper divisors
+        divisor_sum = 1  # 1 is always a proper divisor
+        
+        # Find divisors up to sqrt(n) for efficiency
+        # If i divides n, both i and n/i are divisors
+        i = 2
+        while i * i <= n:
+            if n % i == 0:
+                divisor_sum += i
+                # Add the complementary divisor if it's different
+                if i != n // i and i * i != n:
+                    divisor_sum += n // i
+            i += 1
+        
+        # Check if sum of proper divisors equals the number
+        if divisor_sum == n:
+            perfect.append(n)
+    
+    return perfect
+
+
+def collatz_sequence(n: int) -> dict[str, any]:
+    """
+    Generate the Collatz sequence (3n+1 problem) for a given starting number.
+    
+    The Collatz conjecture states that for any positive integer:
+    - If even: divide by 2
+    - If odd: multiply by 3 and add 1
+    The sequence eventually reaches 1 (unproven but holds for all tested values).
+    
+    Args:
+        n: Starting number for the sequence (1-100000)
+        
+    Returns:
+        Dictionary containing:
+        - 'sequence': List of numbers in the sequence
+        - 'steps': Number of steps to reach 1
+        - 'max_value': Maximum value reached in the sequence
+        
+    Raises:
+        ValueError: If n is less than 1 or greater than 100000
+        
+    Examples:
+        collatz_sequence(1) = {'sequence': [1], 'steps': 0, 'max_value': 1}
+        collatz_sequence(5) = {'sequence': [5, 16, 8, 4, 2, 1], 'steps': 5, 'max_value': 16}
+        collatz_sequence(13) = {'sequence': [13, 40, 20, 10, 5, 16, 8, 4, 2, 1], 'steps': 9, 'max_value': 40}
+        collatz_sequence(27) has 111 steps with max value 9232
+        
+    Mathematical Background:
+        - Also known as the 3n+1 problem, Ulam conjecture, or Syracuse problem
+        - One of the most famous unsolved problems in mathematics
+        - Despite its simplicity, no one has proven it works for all numbers
+        - Tested for all numbers up to 2^68 (as of 2024)
+        - Some sequences can grow very large before returning to 1
+        
+    Algorithm Explanation:
+        1. Start with the given number n
+        2. Apply the rules repeatedly:
+           - If n is even: n = n / 2
+           - If n is odd: n = 3n + 1
+        3. Continue until n = 1
+        4. Track the sequence, step count, and maximum value
+        
+    Time Complexity: Unknown (depends on sequence length, which varies)
+    Space Complexity: O(steps) for storing the sequence
+    """
+    if n < 1 or n > 100000:
+        raise ValueError("n must be between 1 and 100000")
+    
+    sequence = [n]
+    max_value = n
+    steps = 0
+    
+    # Generate sequence until we reach 1
+    while n != 1:
+        if n % 2 == 0:
+            # Even: divide by 2
+            n = n // 2
+        else:
+            # Odd: multiply by 3 and add 1
+            n = 3 * n + 1
+        
+        sequence.append(n)
+        max_value = max(max_value, n)
+        steps += 1
+    
+    return {
+        'sequence': sequence,
+        'steps': steps,
+        'max_value': max_value
+    }
+
+
+# ============================================================================
 # Number Theory Functions
 # ============================================================================
 
@@ -896,6 +1186,96 @@ async def list_tools() -> list[Tool]:
                 "required": ["n", "r"],
             },
         ),
+        Tool(
+            name="pascal_triangle",
+            description=(
+                "Generate Pascal's triangle up to n rows. "
+                "Each number in the triangle is the sum of the two numbers directly above it. "
+                "The triangle has applications in combinatorics, probability, and algebra. "
+                "Uses memoization for efficient repeated calculations."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "rows": {
+                        "type": "integer",
+                        "description": "Number of rows to generate in Pascal's triangle",
+                        "minimum": 1,
+                        "maximum": 30,
+                    },
+                },
+                "required": ["rows"],
+            },
+        ),
+        Tool(
+            name="triangular_numbers",
+            description=(
+                "Calculate triangular numbers - numbers that can form equilateral triangles. "
+                "Can either calculate the nth triangular number or generate a sequence. "
+                "Formula: T(n) = n × (n + 1) / 2. "
+                "Examples: T(5) = 15, sequence: [1, 3, 6, 10, 15]"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "n": {
+                        "type": "integer",
+                        "description": "Position of the triangular number to calculate (1-1000). Mutually exclusive with 'limit'.",
+                        "minimum": 1,
+                        "maximum": 1000,
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Generate sequence of first 'limit' triangular numbers (1-1000). Mutually exclusive with 'n'.",
+                        "minimum": 1,
+                        "maximum": 1000,
+                    },
+                },
+            },
+        ),
+        Tool(
+            name="perfect_numbers",
+            description=(
+                "Find perfect numbers up to a given limit. "
+                "A perfect number equals the sum of its proper divisors. "
+                "Examples: 6 (1+2+3=6), 28 (1+2+4+7+14=28). "
+                "Perfect numbers are extremely rare - only 4 exist below 10000."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "limit": {
+                        "type": "integer",
+                        "description": "Upper bound for searching perfect numbers",
+                        "minimum": 1,
+                        "maximum": 10000,
+                    },
+                },
+                "required": ["limit"],
+            },
+        ),
+        Tool(
+            name="collatz_sequence",
+            description=(
+                "Generate the Collatz sequence (3n+1 problem) for a starting number. "
+                "Rules: If even, divide by 2; if odd, multiply by 3 and add 1. "
+                "The sequence continues until reaching 1. "
+                "Returns the complete sequence, step count, and maximum value reached. "
+                "Example: 13 → [13, 40, 20, 10, 5, 16, 8, 4, 2, 1] (9 steps)"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "n": {
+                        "type": "integer",
+                        "description": "Starting number for the Collatz sequence",
+                        "minimum": 1,
+                        "maximum": 100000,
+                    },
+                },
+                "required": ["n"],
+            },
+        ),
     ]
 
 
@@ -939,6 +1319,14 @@ async def call_tool(name: str, arguments: Any) -> CallToolResult:
             return await handle_combinations(arguments)
         elif name == "permutations":
             return await handle_permutations(arguments)
+        elif name == "pascal_triangle":
+            return await handle_pascal_triangle(arguments)
+        elif name == "triangular_numbers":
+            return await handle_triangular_numbers(arguments)
+        elif name == "perfect_numbers":
+            return await handle_perfect_numbers(arguments)
+        elif name == "collatz_sequence":
+            return await handle_collatz_sequence(arguments)
         else:
             logger.error(f"Unknown tool requested: {name}")
             return CallToolResult(
@@ -1628,6 +2016,302 @@ async def handle_permutations(arguments: Any) -> CallToolResult:
     )
     
     logger.info(f"P({n},{r}) = {result}")
+    
+    return CallToolResult(
+        content=[TextContent(type="text", text=result_text)],
+        isError=False,
+    )
+
+
+async def handle_pascal_triangle(arguments: Any) -> CallToolResult:
+    """Handle pascal_triangle tool calls."""
+    # Extract and validate parameters
+    rows = arguments.get("rows")
+    
+    # Validate required parameter
+    if rows is None:
+        logger.error("Missing required parameter: rows")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text="Missing required parameter 'rows'"
+            )],
+            isError=True,
+        )
+    
+    # Validate parameter type
+    if not isinstance(rows, int):
+        logger.error(f"Invalid parameter type for rows: {type(rows)}")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=f"Parameter 'rows' must be an integer, got {type(rows).__name__}"
+            )],
+            isError=True,
+        )
+    
+    # Validate range
+    if rows < 1 or rows > 30:
+        logger.error(f"Parameter rows out of range: {rows}")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text="Parameter 'rows' must be between 1 and 30"
+            )],
+            isError=True,
+        )
+    
+    # Generate Pascal's triangle
+    logger.info(f"Generating Pascal's triangle with {rows} rows")
+    triangle = pascal_triangle(rows)
+    
+    # Format the result
+    result_text = f"Pascal's triangle ({rows} rows):\n"
+    for i, row in enumerate(triangle):
+        result_text += f"Row {i}: {row}\n"
+    
+    result_text += f"\nVisualization tip: Each number is the sum of the two numbers above it."
+    result_text += f"\nLast row: {triangle[-1]}"
+    
+    logger.info(f"Generated Pascal's triangle with {rows} rows")
+    
+    return CallToolResult(
+        content=[TextContent(type="text", text=result_text)],
+        isError=False,
+    )
+
+
+async def handle_triangular_numbers(arguments: Any) -> CallToolResult:
+    """Handle triangular_numbers tool calls."""
+    # Extract parameters
+    n = arguments.get("n")
+    limit = arguments.get("limit")
+    
+    # Validate that exactly one parameter is provided
+    if n is None and limit is None:
+        logger.error("Missing required parameter: either n or limit")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text="Either 'n' or 'limit' must be provided"
+            )],
+            isError=True,
+        )
+    
+    if n is not None and limit is not None:
+        logger.error("Both n and limit provided")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text="Cannot provide both 'n' and 'limit', use only one"
+            )],
+            isError=True,
+        )
+    
+    # Handle single triangular number calculation
+    if n is not None:
+        # Validate parameter type
+        if not isinstance(n, int):
+            logger.error(f"Invalid parameter type for n: {type(n)}")
+            return CallToolResult(
+                content=[TextContent(
+                    type="text",
+                    text=f"Parameter 'n' must be an integer, got {type(n).__name__}"
+                )],
+                isError=True,
+            )
+        
+        # Validate range
+        if n < 1 or n > 1000:
+            logger.error(f"Parameter n out of range: {n}")
+            return CallToolResult(
+                content=[TextContent(
+                    type="text",
+                    text="Parameter 'n' must be between 1 and 1000"
+                )],
+                isError=True,
+            )
+        
+        # Calculate triangular number
+        logger.info(f"Calculating triangular number T({n})")
+        result = triangular_numbers(n=n)
+        
+        result_text = (
+            f"Triangular number T({n}):\n"
+            f"T({n}) = {result}\n\n"
+            f"Formula: T(n) = n × (n + 1) / 2 = {n} × {n + 1} / 2 = {result}"
+        )
+        
+        logger.info(f"T({n}) = {result}")
+    
+    # Handle sequence generation
+    else:
+        # Validate parameter type
+        if not isinstance(limit, int):
+            logger.error(f"Invalid parameter type for limit: {type(limit)}")
+            return CallToolResult(
+                content=[TextContent(
+                    type="text",
+                    text=f"Parameter 'limit' must be an integer, got {type(limit).__name__}"
+                )],
+                isError=True,
+            )
+        
+        # Validate range
+        if limit < 1 or limit > 1000:
+            logger.error(f"Parameter limit out of range: {limit}")
+            return CallToolResult(
+                content=[TextContent(
+                    type="text",
+                    text="Parameter 'limit' must be between 1 and 1000"
+                )],
+                isError=True,
+            )
+        
+        # Generate sequence
+        logger.info(f"Generating triangular number sequence up to {limit}")
+        sequence = triangular_numbers(limit=limit)
+        
+        result_text = (
+            f"Triangular number sequence (first {limit} numbers):\n"
+            f"{sequence}\n\n"
+            f"Last number: T({limit}) = {sequence[-1]}"
+        )
+        
+        logger.info(f"Generated {limit} triangular numbers")
+    
+    return CallToolResult(
+        content=[TextContent(type="text", text=result_text)],
+        isError=False,
+    )
+
+
+async def handle_perfect_numbers(arguments: Any) -> CallToolResult:
+    """Handle perfect_numbers tool calls."""
+    # Extract and validate parameters
+    limit = arguments.get("limit")
+    
+    # Validate required parameter
+    if limit is None:
+        logger.error("Missing required parameter: limit")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text="Missing required parameter 'limit'"
+            )],
+            isError=True,
+        )
+    
+    # Validate parameter type
+    if not isinstance(limit, int):
+        logger.error(f"Invalid parameter type for limit: {type(limit)}")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=f"Parameter 'limit' must be an integer, got {type(limit).__name__}"
+            )],
+            isError=True,
+        )
+    
+    # Validate range
+    if limit < 1 or limit > 10000:
+        logger.error(f"Parameter limit out of range: {limit}")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text="Parameter 'limit' must be between 1 and 10000"
+            )],
+            isError=True,
+        )
+    
+    # Find perfect numbers
+    logger.info(f"Finding perfect numbers up to {limit}")
+    perfect = perfect_numbers(limit)
+    
+    # Format the result
+    if not perfect:
+        result_text = f"No perfect numbers found up to {limit}"
+    else:
+        result_text = f"Perfect numbers up to {limit}:\n{perfect}\n\n"
+        result_text += f"Count: {len(perfect)} perfect number(s) found\n\n"
+        result_text += "Note: Perfect numbers are extremely rare. "
+        result_text += "A perfect number equals the sum of its proper divisors.\n"
+        result_text += "Examples: 6 (1+2+3=6), 28 (1+2+4+7+14=28)"
+    
+    logger.info(f"Found {len(perfect)} perfect numbers up to {limit}")
+    
+    return CallToolResult(
+        content=[TextContent(type="text", text=result_text)],
+        isError=False,
+    )
+
+
+async def handle_collatz_sequence(arguments: Any) -> CallToolResult:
+    """Handle collatz_sequence tool calls."""
+    # Extract and validate parameters
+    n = arguments.get("n")
+    
+    # Validate required parameter
+    if n is None:
+        logger.error("Missing required parameter: n")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text="Missing required parameter 'n'"
+            )],
+            isError=True,
+        )
+    
+    # Validate parameter type
+    if not isinstance(n, int):
+        logger.error(f"Invalid parameter type for n: {type(n)}")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=f"Parameter 'n' must be an integer, got {type(n).__name__}"
+            )],
+            isError=True,
+        )
+    
+    # Validate range
+    if n < 1 or n > 100000:
+        logger.error(f"Parameter n out of range: {n}")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text="Parameter 'n' must be between 1 and 100000"
+            )],
+            isError=True,
+        )
+    
+    # Generate Collatz sequence
+    logger.info(f"Generating Collatz sequence for {n}")
+    result = collatz_sequence(n)
+    
+    # Format the result
+    sequence = result['sequence']
+    steps = result['steps']
+    max_value = result['max_value']
+    
+    # Show full sequence if short, otherwise show abbreviated
+    if len(sequence) <= 20:
+        sequence_str = str(sequence)
+    else:
+        # Show first 10 and last 5 elements
+        sequence_str = (
+            f"[{', '.join(map(str, sequence[:10]))}, ..., "
+            f"{', '.join(map(str, sequence[-5:]))}]"
+        )
+    
+    result_text = (
+        f"Collatz sequence starting from {n}:\n"
+        f"Sequence ({steps} steps): {sequence_str}\n\n"
+        f"Steps to reach 1: {steps}\n"
+        f"Maximum value reached: {max_value}\n\n"
+        f"Rules: If even, divide by 2; if odd, multiply by 3 and add 1"
+    )
+    
+    logger.info(f"Collatz sequence for {n}: {steps} steps, max value {max_value}")
     
     return CallToolResult(
         content=[TextContent(type="text", text=result_text)],
