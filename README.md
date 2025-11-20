@@ -22,8 +22,15 @@ Dedicated statistical analysis tools:
 - **Descriptive Statistics**: Calculate mean, median, mode, standard deviation, variance, min, max, quartiles, and range
 - **Correlation Analysis**: Pearson correlation coefficient and covariance between two datasets
 - **Percentile Calculations**: Calculate specific percentiles from datasets with linear interpolation
-- **Outlier Detection**: Identify outliers using IQR method with configurable threshold
-- **Time Series Analysis**: 6 comprehensive tools for process monitoring and predictive maintenance
+- **Outlier Detection**: 7 methods including IQR, Z-score, Grubbs test, Dixon Q test, and more (see [OUTLIER_DETECTION_TOOLS.md](OUTLIER_DETECTION_TOOLS.md))
+  - **IQR Method**: Basic outlier detection using interquartile range
+  - **Z-Score Detection**: Standard and Modified Z-score methods for normally distributed data
+  - **Grubbs Test**: Statistical test for single outliers with p-values (FDA/ISO compliant)
+  - **Dixon Q Test**: Quick test for small datasets (3-30 points)
+  - **Isolation Forest**: Machine learning-based anomaly detection for complex patterns
+  - **Mahalanobis Distance**: Multivariate outlier detection considering variable correlations
+  - **Streaming Detection**: Real-time outlier detection for continuous sensor streams (SCADA)
+- **Time Series Analysis**: 6 comprehensive tools for process monitoring and predictive maintenance (see [TIME_SERIES_TOOLS.md](TIME_SERIES_TOOLS.md))
   - **Moving Average**: Simple, Exponential, and Weighted MA for smoothing sensor data
   - **Trend Detection**: Linear regression for equipment degradation and efficiency analysis
   - **Autocorrelation**: Identify cyclic patterns and batch process cycles
@@ -187,6 +194,19 @@ Once configured, you can interact with the server through Claude:
 "Identify outliers in [10, 12, 14, 13, 15, 100, 11, 13, 14] using threshold 1.5"
 "Calculate mean and standard deviation for my dataset"
 ```
+
+### Advanced Outlier Detection (Stats Server)
+```
+"Check these temperature readings for outliers: [200.1, 200.3, 199.8, 250.5, 200.2]"
+"Use modified Z-score to detect sensor faults in this pressure data"
+"Is 15.8 an outlier in these measurements: [10.2, 10.3, 10.1, 15.8, 10.4]? Use Grubbs test"
+"Validate laboratory test results using Dixon Q test"
+"Detect anomalies in multivariate sensor data using Isolation Forest"
+"Find unusual combinations in temperature, pressure, and flow data using Mahalanobis distance"
+"Monitor reactor pressure in real-time with streaming outlier detection"
+```
+
+**For detailed outlier detection documentation and industrial use cases, see [OUTLIER_DETECTION_TOOLS.md](OUTLIER_DETECTION_TOOLS.md)**
 
 ### Time Series Analysis (Stats Server)
 ```
