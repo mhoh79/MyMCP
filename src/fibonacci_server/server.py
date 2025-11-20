@@ -1594,6 +1594,286 @@ def generate_hash(data: str, algorithm: str, output_format: str = "hex") -> dict
     }
 
 
+# ============================================================================
+# Unit Conversion Functions
+# ============================================================================
+
+
+def unit_convert(value: float, from_unit: str, to_unit: str) -> dict[str, Any]:
+    """
+    Convert between different units of measurement across multiple categories.
+    
+    Supports comprehensive unit conversions for:
+    - Length (metric and imperial)
+    - Weight/Mass (metric and imperial)
+    - Temperature (with formula display)
+    - Volume (metric and imperial)
+    - Time (milliseconds to years)
+    - Digital Storage (binary, 1024-based)
+    - Speed (m/s, km/h, mph)
+    
+    Args:
+        value: The numeric value to convert
+        from_unit: The source unit (case-insensitive, accepts abbreviations)
+        to_unit: The target unit (case-insensitive, accepts abbreviations)
+        
+    Returns:
+        Dictionary containing:
+        - 'value': The original value
+        - 'from_unit': The source unit (normalized)
+        - 'to_unit': The target unit (normalized)
+        - 'result': The converted value
+        - 'formatted': Human-readable result string
+        - 'formula': Conversion formula (for temperature) or factor used
+        
+    Raises:
+        ValueError: If units are invalid, not in same category, or conversion fails
+        
+    Examples:
+        unit_convert(100, "km", "mi")
+        >>> {'result': 62.137, 'formatted': '100 km = 62.137 mi', ...}
+        
+        unit_convert(75, "F", "C")
+        >>> {'result': 23.89, 'formatted': '75°F = 23.89°C', 'formula': '(F - 32) × 5/9', ...}
+        
+        unit_convert(2, "GB", "MB")
+        >>> {'result': 2048, 'formatted': '2 GB = 2048 MB', ...}
+        
+    Algorithm Explanation:
+        1. Normalize unit names to lowercase and map aliases
+        2. Identify the category of units (length, weight, etc.)
+        3. Validate both units are in the same category
+        4. For temperature: use conversion formulas
+        5. For other units: convert to base unit, then to target unit
+        6. Round result to appropriate precision
+        7. Return formatted result with formula/factor information
+        
+    Time Complexity: O(1) - all conversions are direct calculations
+    Space Complexity: O(1) - fixed size conversion tables
+    """
+    # Normalize unit names to lowercase for case-insensitive matching
+    from_unit_lower = from_unit.lower().strip()
+    to_unit_lower = to_unit.lower().strip()
+    
+    # Define unit categories with conversion factors to base units
+    # Base units: meter (length), gram (weight), celsius (temp), liter (volume),
+    #             second (time), byte (storage), m/s (speed)
+    
+    # ===== LENGTH CONVERSIONS =====
+    # Base unit: meter (m)
+    length_units = {
+        'millimeter': 0.001, 'mm': 0.001,
+        'centimeter': 0.01, 'cm': 0.01,
+        'meter': 1.0, 'm': 1.0,
+        'kilometer': 1000.0, 'km': 1000.0,
+        'inch': 0.0254, 'in': 0.0254,  # Exactly 2.54 cm
+        'foot': 0.3048, 'ft': 0.3048,  # Exactly 0.3048 m
+        'yard': 0.9144, 'yd': 0.9144,  # Exactly 0.9144 m
+        'mile': 1609.344, 'mi': 1609.344,  # Exactly 1609.344 m
+    }
+    
+    # ===== WEIGHT/MASS CONVERSIONS =====
+    # Base unit: gram (g)
+    weight_units = {
+        'milligram': 0.001, 'mg': 0.001,
+        'gram': 1.0, 'g': 1.0,
+        'kilogram': 1000.0, 'kg': 1000.0,
+        'tonne': 1000000.0, 't': 1000000.0, 'metric ton': 1000000.0,
+        'ounce': 28.349523125, 'oz': 28.349523125,  # Exactly
+        'pound': 453.59237, 'lb': 453.59237,  # Exactly
+        'ton': 907184.74, 'us ton': 907184.74,  # US short ton
+    }
+    
+    # ===== TEMPERATURE CONVERSIONS =====
+    # Special handling - not factor-based, uses formulas
+    temperature_units = ['celsius', 'c', 'fahrenheit', 'f', 'kelvin', 'k']
+    
+    # ===== VOLUME CONVERSIONS =====
+    # Base unit: liter (l)
+    volume_units = {
+        'milliliter': 0.001, 'ml': 0.001,
+        'liter': 1.0, 'l': 1.0, 'litre': 1.0,
+        'cubic meter': 1000.0, 'm3': 1000.0, 'm³': 1000.0,
+        'fluid ounce': 0.0295735, 'fl oz': 0.0295735, 'floz': 0.0295735,  # US fluid ounce
+        'cup': 0.236588, 'cups': 0.236588,  # US cup
+        'pint': 0.473176, 'pt': 0.473176, 'pints': 0.473176,  # US liquid pint
+        'quart': 0.946353, 'qt': 0.946353, 'quarts': 0.946353,  # US liquid quart
+        'gallon': 3.78541, 'gal': 3.78541, 'gallons': 3.78541,  # US gallon
+    }
+    
+    # ===== TIME CONVERSIONS =====
+    # Base unit: second (s)
+    time_units = {
+        'millisecond': 0.001, 'ms': 0.001,
+        'second': 1.0, 's': 1.0, 'sec': 1.0,
+        'minute': 60.0, 'min': 60.0, 'minutes': 60.0,
+        'hour': 3600.0, 'h': 3600.0, 'hr': 3600.0, 'hours': 3600.0,
+        'day': 86400.0, 'd': 86400.0, 'days': 86400.0,
+        'week': 604800.0, 'weeks': 604800.0, 'wk': 604800.0,
+        'year': 31536000.0, 'years': 31536000.0, 'yr': 31536000.0,  # 365 days
+    }
+    
+    # ===== DIGITAL STORAGE CONVERSIONS =====
+    # Base unit: byte (B)
+    # Using binary (1024) not decimal (1000) as per standard computer storage
+    storage_units = {
+        'bit': 0.125, 'bits': 0.125,
+        'byte': 1.0, 'b': 1.0, 'bytes': 1.0,
+        'kilobyte': 1024.0, 'kb': 1024.0,  # Binary kilobyte
+        'megabyte': 1048576.0, 'mb': 1048576.0,  # 1024^2
+        'gigabyte': 1073741824.0, 'gb': 1073741824.0,  # 1024^3
+        'terabyte': 1099511627776.0, 'tb': 1099511627776.0,  # 1024^4
+    }
+    
+    # ===== SPEED CONVERSIONS =====
+    # Base unit: meters per second (m/s)
+    speed_units = {
+        'meters per second': 1.0, 'm/s': 1.0, 'mps': 1.0,
+        'kilometers per hour': 0.277778, 'km/h': 0.277778, 'kph': 0.277778, 'kmh': 0.277778,
+        'miles per hour': 0.44704, 'mph': 0.44704,
+    }
+    
+    # Determine which category the units belong to
+    def get_unit_category(unit: str) -> tuple[str, dict]:
+        """Return (category_name, conversion_dict) for a unit."""
+        if unit in length_units:
+            return ('length', length_units)
+        elif unit in weight_units:
+            return ('weight', weight_units)
+        elif unit in temperature_units:
+            return ('temperature', {})
+        elif unit in volume_units:
+            return ('volume', volume_units)
+        elif unit in time_units:
+            return ('time', time_units)
+        elif unit in storage_units:
+            return ('storage', storage_units)
+        elif unit in speed_units:
+            return ('speed', speed_units)
+        else:
+            return (None, {})
+    
+    # Get categories for both units
+    from_category, from_dict = get_unit_category(from_unit_lower)
+    to_category, to_dict = get_unit_category(to_unit_lower)
+    
+    # Validate units are recognized
+    if from_category is None:
+        raise ValueError(
+            f"Unknown unit: '{from_unit}'. Please check the unit name or abbreviation."
+        )
+    
+    if to_category is None:
+        raise ValueError(
+            f"Unknown unit: '{to_unit}'. Please check the unit name or abbreviation."
+        )
+    
+    # Validate units are in the same category
+    if from_category != to_category:
+        raise ValueError(
+            f"Cannot convert between different unit categories: "
+            f"'{from_unit}' is a {from_category} unit, "
+            f"but '{to_unit}' is a {to_category} unit."
+        )
+    
+    # Perform conversion based on category
+    result = 0.0
+    formula = None
+    
+    if from_category == 'temperature':
+        # Temperature conversions use formulas, not factors
+        # Normalize temperature unit names
+        from_temp = from_unit_lower
+        to_temp = to_unit_lower
+        
+        # Map to standard names
+        temp_map = {'c': 'celsius', 'f': 'fahrenheit', 'k': 'kelvin'}
+        from_temp = temp_map.get(from_temp, from_temp)
+        to_temp = temp_map.get(to_temp, to_temp)
+        
+        # Convert from source to Celsius first (as intermediate)
+        if from_temp == 'celsius':
+            celsius_value = value
+        elif from_temp == 'fahrenheit':
+            celsius_value = (value - 32) * 5/9
+            formula = "(F - 32) × 5/9"
+        elif from_temp == 'kelvin':
+            celsius_value = value - 273.15
+            formula = "K - 273.15"
+        else:
+            raise ValueError(f"Unknown temperature unit: {from_unit}")
+        
+        # Convert from Celsius to target
+        if to_temp == 'celsius':
+            result = celsius_value
+            if formula is None:
+                formula = "Same unit"
+        elif to_temp == 'fahrenheit':
+            result = celsius_value * 9/5 + 32
+            if from_temp == 'celsius':
+                formula = "C × 9/5 + 32"
+            elif from_temp == 'fahrenheit':
+                formula = "Same unit"
+            else:
+                formula = f"({formula}) × 9/5 + 32"
+        elif to_temp == 'kelvin':
+            result = celsius_value + 273.15
+            if from_temp == 'celsius':
+                formula = "C + 273.15"
+            elif from_temp == 'kelvin':
+                formula = "Same unit"
+            else:
+                formula = f"({formula}) + 273.15"
+        else:
+            raise ValueError(f"Unknown temperature unit: {to_unit}")
+        
+        # Temperature-specific formatting
+        temp_symbols = {'celsius': '°C', 'fahrenheit': '°F', 'kelvin': 'K'}
+        from_symbol = temp_symbols.get(from_temp, from_unit)
+        to_symbol = temp_symbols.get(to_temp, to_unit)
+        
+        formatted = f"{value:.2f}{from_symbol} = {result:.2f}{to_symbol}"
+        if formula and formula != "Same unit":
+            formatted += f" (Formula: {formula})"
+            
+    else:
+        # Factor-based conversion for all other categories
+        # Convert: value in from_unit -> base unit -> to_unit
+        # result = value * (from_factor / to_factor)
+        from_factor = from_dict[from_unit_lower]
+        to_factor = to_dict[to_unit_lower]
+        
+        # Convert to base unit, then to target unit
+        base_value = value * from_factor
+        result = base_value / to_factor
+        
+        # Calculate the effective conversion factor
+        conversion_factor = from_factor / to_factor
+        formula = f"× {conversion_factor:.6g}"
+        
+        # Format with appropriate precision
+        # Use more decimals for very small or very large results
+        if abs(result) < 0.01 or abs(result) > 10000:
+            formatted = f"{value:g} {from_unit} = {result:.6g} {to_unit}"
+        else:
+            formatted = f"{value:g} {from_unit} = {result:.4g} {to_unit}"
+    
+    return {
+        'value': value,
+        'from_unit': from_unit,
+        'to_unit': to_unit,
+        'result': round(result, 10),  # Round to avoid floating point artifacts
+        'formatted': formatted,
+        'formula': formula,
+        'category': from_category
+    }
+
+
+# ============================================================================
+# MCP Server Implementation
+# ============================================================================
+
+
 # Initialize the MCP server with a descriptive name
 app = Server("fibonacci-calculator")
 
@@ -2068,6 +2348,38 @@ async def list_tools() -> list[Tool]:
                 "required": ["data"],
             },
         ),
+        Tool(
+            name="unit_convert",
+            description=(
+                "Convert between different units of measurement across multiple categories. "
+                "Supports: Length (mm, cm, m, km, in, ft, yd, mi), "
+                "Weight (mg, g, kg, t, oz, lb, ton), "
+                "Temperature (C, F, K with formulas), "
+                "Volume (ml, l, m3, fl oz, cup, pt, qt, gal), "
+                "Time (ms, s, min, h, d, week, year), "
+                "Digital Storage (bit, B, KB, MB, GB, TB using binary 1024), "
+                "Speed (m/s, km/h, mph). "
+                "Uses precise conversion factors and handles both abbreviated and full unit names (case-insensitive)."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "value": {
+                        "type": "number",
+                        "description": "The numeric value to convert",
+                    },
+                    "from_unit": {
+                        "type": "string",
+                        "description": "The source unit (e.g., 'km', 'kilometer', 'F', 'fahrenheit', 'GB')",
+                    },
+                    "to_unit": {
+                        "type": "string",
+                        "description": "The target unit (e.g., 'mi', 'mile', 'C', 'celsius', 'MB')",
+                    },
+                },
+                "required": ["value", "from_unit", "to_unit"],
+            },
+        ),
     ]
 
 
@@ -2129,6 +2441,8 @@ async def call_tool(name: str, arguments: Any) -> CallToolResult:
             return await handle_percentile(arguments)
         elif name == "outliers":
             return await handle_outliers(arguments)
+        elif name == "unit_convert":
+            return await handle_unit_convert(arguments)
         else:
             logger.error(f"Unknown tool requested: {name}")
             return CallToolResult(
@@ -3541,6 +3855,113 @@ async def handle_outliers(arguments: Any) -> CallToolResult:
         logger.error(f"Validation error: {e}")
         return CallToolResult(
             content=[TextContent(type="text", text=f"Validation error: {str(e)}")],
+            isError=True,
+        )
+
+
+async def handle_unit_convert(arguments: Any) -> CallToolResult:
+    """Handle unit_convert tool calls."""
+    # Extract and validate parameters
+    value = arguments.get("value")
+    from_unit = arguments.get("from_unit")
+    to_unit = arguments.get("to_unit")
+    
+    # Validate required parameters
+    if value is None:
+        logger.error("Missing required parameter: value")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text="Missing required parameter 'value'"
+            )],
+            isError=True,
+        )
+    
+    if from_unit is None:
+        logger.error("Missing required parameter: from_unit")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text="Missing required parameter 'from_unit'"
+            )],
+            isError=True,
+        )
+    
+    if to_unit is None:
+        logger.error("Missing required parameter: to_unit")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text="Missing required parameter 'to_unit'"
+            )],
+            isError=True,
+        )
+    
+    # Validate parameter types
+    if not isinstance(value, (int, float)):
+        logger.error(f"Invalid parameter type for value: {type(value)}")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=f"Parameter 'value' must be a number, got {type(value).__name__}"
+            )],
+            isError=True,
+        )
+    
+    if not isinstance(from_unit, str):
+        logger.error(f"Invalid parameter type for from_unit: {type(from_unit)}")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=f"Parameter 'from_unit' must be a string, got {type(from_unit).__name__}"
+            )],
+            isError=True,
+        )
+    
+    if not isinstance(to_unit, str):
+        logger.error(f"Invalid parameter type for to_unit: {type(to_unit)}")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=f"Parameter 'to_unit' must be a string, got {type(to_unit).__name__}"
+            )],
+            isError=True,
+        )
+    
+    # Perform unit conversion
+    try:
+        logger.info(f"Converting {value} {from_unit} to {to_unit}")
+        result = unit_convert(value, from_unit, to_unit)
+        
+        # Format the result
+        result_text = (
+            f"Unit Conversion:\n\n"
+            f"{result['formatted']}\n\n"
+            f"Details:\n"
+            f"  Category: {result['category'].title()}\n"
+            f"  Original: {result['value']} {result['from_unit']}\n"
+            f"  Result: {result['result']} {result['to_unit']}\n"
+        )
+        
+        # Add formula/factor information
+        if result['formula']:
+            if result['category'] == 'temperature':
+                result_text += f"  Formula: {result['formula']}\n"
+            else:
+                result_text += f"  Conversion Factor: {result['formula']}\n"
+        
+        logger.info(f"Conversion successful: {value} {from_unit} = {result['result']} {to_unit}")
+        
+        return CallToolResult(
+            content=[TextContent(type="text", text=result_text)],
+            isError=False,
+        )
+        
+    except ValueError as e:
+        # Handle validation errors from unit_convert
+        logger.error(f"Unit conversion error: {e}")
+        return CallToolResult(
+            content=[TextContent(type="text", text=f"Unit conversion error: {str(e)}")],
             isError=True,
         )
 
