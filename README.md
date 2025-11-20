@@ -7,7 +7,8 @@ A complete Model Context Protocol (MCP) server implementation in Python that pro
 - **Fibonacci Calculations**: Calculate individual Fibonacci numbers or generate complete sequences
 - **Prime Number Tools**: Check primality, generate primes, find nth prime, and factorize numbers
 - **Number Theory Tools**: GCD, LCM, factorial, combinations, and permutations
-- **High Performance**: Optimized algorithms (Euclidean algorithm, Sieve of Eratosthenes, efficient combinatorics)
+- **Sequence Generators**: Pascal's triangle, triangular numbers, perfect numbers, and Collatz sequences
+- **High Performance**: Optimized algorithms (Euclidean algorithm, Sieve of Eratosthenes, efficient combinatorics, memoization)
 - **Robust Validation**: Comprehensive error handling and input validation with appropriate ranges
 - **Production Ready**: Full logging, proper error messages, and graceful shutdown
 - **Well Documented**: Extensive code annotations and inline documentation for learning
@@ -111,6 +112,15 @@ Once configured, you can interact with the server through Claude:
 "Calculate 10 factorial"
 "How many ways can I choose 3 items from 10?"
 "How many ways can I arrange 3 items from 5?"
+```
+
+### Sequence Generators
+```
+"Generate the first 6 rows of Pascal's triangle"
+"What's the 10th triangular number?"
+"Show me the first 10 triangular numbers"
+"Find all perfect numbers up to 10000"
+"What's the Collatz sequence for 27?"
 ```
 
 ## 🔧 Tool Specifications
@@ -297,6 +307,105 @@ Once configured, you can interact with the server through Claude:
 - r > n
 - Missing required parameters
 
+### Tool: `pascal_triangle`
+
+**Parameters:**
+- `rows` (integer, required): Number of rows to generate (1-30)
+
+**Response Format:**
+- 2D array representing Pascal's triangle
+- Each inner list is a row in the triangle
+- Example: Row 5: `[1, 4, 6, 4, 1]`
+
+**Mathematical Background:**
+- Each number is the sum of the two numbers above it
+- Entry in row n, position k is the binomial coefficient C(n,k)
+- Used in probability, combinatorics, and algebra
+
+**Algorithm:** Iterative generation with memoization for performance
+
+**Error Handling:**
+- Invalid input types
+- Out of range values (< 1 or > 30)
+- Missing required parameters
+
+### Tool: `triangular_numbers`
+
+**Parameters:**
+- `n` (integer, optional): Position of triangular number to calculate (1-1000)
+- `limit` (integer, optional): Generate sequence of first 'limit' numbers (1-1000)
+- Note: Exactly one of `n` or `limit` must be provided
+
+**Response Format:**
+- If `n` provided: Single integer (the nth triangular number)
+- If `limit` provided: List of triangular numbers
+- Example: T(5) = 15, sequence: [1, 3, 6, 10, 15]
+
+**Formula:** T(n) = n × (n + 1) / 2
+
+**Mathematical Background:**
+- Represents dots that can form an equilateral triangle
+- Sum of first n natural numbers: 1 + 2 + 3 + ... + n
+
+**Algorithm:** Direct formula for single value, iterative for sequence
+
+**Error Handling:**
+- Invalid input types
+- Out of range values (< 1 or > 1000)
+- Neither or both parameters provided
+- Missing required parameters
+
+### Tool: `perfect_numbers`
+
+**Parameters:**
+- `limit` (integer, required): Upper bound for searching (1-10000)
+
+**Response Format:**
+- List of all perfect numbers up to limit
+- Example: [6, 28, 496, 8128]
+
+**Mathematical Background:**
+- A perfect number equals the sum of its proper divisors
+- Examples: 6 (1+2+3=6), 28 (1+2+4+7+14=28)
+- Extremely rare - only 4 exist below 10000
+- Related to Mersenne primes via Euclid-Euler theorem
+
+**Algorithm:** Check each number by finding divisors up to sqrt(n)
+
+**Error Handling:**
+- Invalid input types
+- Out of range values (< 1 or > 10000)
+- Missing required parameters
+
+### Tool: `collatz_sequence`
+
+**Parameters:**
+- `n` (integer, required): Starting number for the sequence (1-100000)
+
+**Response Format:**
+- Dictionary containing:
+  - `sequence`: List of numbers in the sequence
+  - `steps`: Number of steps to reach 1
+  - `max_value`: Maximum value reached
+- Example: 13 → [13, 40, 20, 10, 5, 16, 8, 4, 2, 1] (9 steps)
+
+**Rules:**
+- If even: divide by 2
+- If odd: multiply by 3 and add 1
+- Continue until reaching 1
+
+**Mathematical Background:**
+- Also known as the 3n+1 problem or Ulam conjecture
+- One of the most famous unsolved problems in mathematics
+- Tested for all numbers up to 2^68, but unproven in general
+
+**Algorithm:** Iterative application of rules, tracking sequence and statistics
+
+**Error Handling:**
+- Invalid input types
+- Out of range values (< 1 or > 100000)
+- Missing required parameters
+
 ## 📁 Project Structure
 
 ```
@@ -345,7 +454,11 @@ from src.fibonacci_server.server import (
     lcm,
     factorial,
     combinations,
-    permutations
+    permutations,
+    pascal_triangle,
+    triangular_numbers,
+    perfect_numbers,
+    collatz_sequence
 )
 
 # Fibonacci calculations
@@ -364,6 +477,13 @@ print(lcm([12, 18]))  # Output: 36
 print(factorial(5))  # Output: 120
 print(combinations(5, 2))  # Output: 10
 print(permutations(5, 2))  # Output: 20
+
+# Sequence generators
+print(pascal_triangle(5))  # Output: [[1], [1, 1], [1, 2, 1], [1, 3, 3, 1], [1, 4, 6, 4, 1]]
+print(triangular_numbers(n=5))  # Output: 15
+print(triangular_numbers(limit=5))  # Output: [1, 3, 6, 10, 15]
+print(perfect_numbers(100))  # Output: [6, 28]
+print(collatz_sequence(13))  # Output: {'sequence': [13, 40, 20, 10, 5, 16, 8, 4, 2, 1], 'steps': 9, 'max_value': 40}
 ```
 
 ## 🏗️ Architecture
@@ -446,6 +566,7 @@ Your server is working correctly if you can:
 3. ✅ Ask Claude to calculate Fibonacci numbers and receive correct results
 4. ✅ Use prime number tools and verify the mathematical correctness
 5. ✅ Use number theory tools and verify the mathematical correctness
+6. ✅ Use sequence generators and verify the mathematical correctness
 
 Example verifications:
 - Request: "Calculate the first 10 Fibonacci numbers"
@@ -475,6 +596,18 @@ Example verifications:
 - Request: "How many ways can I arrange 2 items from 5?"
 - Expected: `20` (P(5,2))
 
+- Request: "Generate the first 6 rows of Pascal's triangle"
+- Expected: `[[1], [1, 1], [1, 2, 1], [1, 3, 3, 1], [1, 4, 6, 4, 1], [1, 5, 10, 10, 5, 1]]`
+
+- Request: "What's the 10th triangular number?"
+- Expected: `55`
+
+- Request: "Find all perfect numbers up to 10000"
+- Expected: `[6, 28, 496, 8128]`
+
+- Request: "What's the Collatz sequence for 13?"
+- Expected: `[13, 40, 20, 10, 5, 16, 8, 4, 2, 1]` (9 steps)
+
 ## 📄 License
 
 MIT
@@ -495,6 +628,7 @@ This project demonstrates:
   - Prime number algorithms (Sieve of Eratosthenes, trial division)
   - Number theory algorithms (Euclidean algorithm for GCD)
   - Combinatorics (efficient computation of combinations and permutations)
+  - Sequence generators (Pascal's triangle with memoization, triangular numbers, perfect numbers, Collatz conjecture)
 - Mathematical computation and number theory
 
 ---
