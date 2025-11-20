@@ -4,6 +4,8 @@ This server exposes a tool that calculates Fibonacci numbers.
 """
 
 import asyncio
+import base64
+import hashlib
 import logging
 from typing import Any
 
@@ -943,6 +945,154 @@ def permutations(n: int, r: int) -> int:
     return result
 
 
+# ============================================================================
+# Cryptographic Hash Functions
+# ============================================================================
+
+
+def generate_hash(data: str, algorithm: str, output_format: str = "hex") -> dict[str, Any]:
+    """
+    Generate cryptographic hash of input data using various algorithms.
+    
+    This function supports multiple hashing algorithms with different security
+    characteristics. Each algorithm has specific use cases and security implications.
+    
+    Args:
+        data: Input string to hash (max 1MB = 1,048,576 bytes)
+        algorithm: Hash algorithm to use (md5, sha1, sha256, sha512, blake2b)
+        output_format: Output format (hex or base64, default: hex)
+        
+    Returns:
+        Dictionary containing:
+        - 'hash': The computed hash string in requested format
+        - 'algorithm': The algorithm used
+        - 'output_format': The output format used
+        - 'input_size': Size of input data in bytes
+        - 'hash_size': Size of hash output in bits
+        - 'security_note': Security warning/recommendation for the algorithm
+        
+    Raises:
+        ValueError: If algorithm is not supported
+        ValueError: If output_format is not supported
+        ValueError: If data exceeds 1MB size limit
+        
+    Examples:
+        generate_hash("Hello World", "sha256", "hex")
+        >>> {'hash': 'a591a6d40bf420404a011733cfb7b190d62c65bf0bcda32b57b277d9ad9f146e', ...}
+        
+        generate_hash("password123", "md5", "hex")
+        >>> {'hash': '482c811da5d5b4bc6d497ffa98491e38', ...}
+        
+    Security Notes:
+        **MD5 (128-bit)**:
+        - BROKEN for security purposes - collision attacks are practical
+        - Use ONLY for non-security purposes (checksums, cache keys)
+        - NEVER use for passwords, digital signatures, or certificates
+        
+        **SHA-1 (160-bit)**:
+        - DEPRECATED - collision attacks demonstrated (SHAttered, 2017)
+        - Still used in git commits but NOT recommended for new applications
+        - Acceptable for HMAC in legacy systems but migrate to SHA-256
+        
+        **SHA-256 (256-bit)**:
+        - SECURE and widely used (part of SHA-2 family)
+        - Recommended for most security applications
+        - Good for password hashing WITH proper salt and key derivation
+        - Used in Bitcoin, SSL/TLS certificates, code signing
+        
+        **SHA-512 (512-bit)**:
+        - MORE SECURE than SHA-256 with larger output
+        - Slower but more resistant to collision attacks
+        - Preferred for high-security applications
+        - Good choice when hash length truncation is needed
+        
+        **BLAKE2b (512-bit)**:
+        - MODERN, fast alternative to SHA-2
+        - Comparable security to SHA-3 but faster than MD5
+        - Not yet as widely adopted but excellent choice
+        - Used in file integrity systems and cryptocurrencies (Zcash)
+        
+    Password Hashing Best Practices:
+        - NEVER store passwords as plain hashes
+        - Always use salt (unique random value per password)
+        - Use key derivation functions (PBKDF2, bcrypt, Argon2)
+        - Minimum: SHA-256 with salt, better: use bcrypt/Argon2
+        
+    Algorithm Characteristics:
+        - MD5: Fast, 128-bit, INSECURE for security
+        - SHA-1: Medium, 160-bit, DEPRECATED for security
+        - SHA-256: Medium, 256-bit, SECURE and recommended
+        - SHA-512: Slower, 512-bit, HIGH security
+        - BLAKE2b: Fast, 512-bit, MODERN and secure
+        
+    Time Complexity: O(n) where n is the length of input data
+    Space Complexity: O(n) for storing input + O(1) for hash computation
+    """
+    # Input size validation - prevent DoS with huge inputs
+    MAX_SIZE = 1024 * 1024  # 1MB limit
+    data_bytes = data.encode('utf-8')
+    data_size = len(data_bytes)
+    
+    if data_size > MAX_SIZE:
+        raise ValueError(
+            f"Input data size ({data_size:,} bytes) exceeds maximum allowed size "
+            f"({MAX_SIZE:,} bytes = 1MB). Please use smaller input."
+        )
+    
+    # Validate algorithm
+    supported_algorithms = {
+        'md5': (hashlib.md5, 128, 
+                "⚠️ WARNING: MD5 is CRYPTOGRAPHICALLY BROKEN. Use only for non-security purposes like checksums."),
+        'sha1': (hashlib.sha1, 160, 
+                 "⚠️ CAUTION: SHA-1 is DEPRECATED for security. Avoid for new applications."),
+        'sha256': (hashlib.sha256, 256, 
+                   "✓ SECURE: SHA-256 is recommended for most security applications."),
+        'sha512': (hashlib.sha512, 512, 
+                   "✓ HIGH SECURITY: SHA-512 provides enhanced security with larger output."),
+        'blake2b': (hashlib.blake2b, 512, 
+                    "✓ MODERN: BLAKE2b is fast and secure, comparable to SHA-3.")
+    }
+    
+    algorithm_lower = algorithm.lower()
+    if algorithm_lower not in supported_algorithms:
+        raise ValueError(
+            f"Unsupported algorithm: '{algorithm}'. "
+            f"Supported algorithms are: {', '.join(supported_algorithms.keys())}"
+        )
+    
+    # Validate output format
+    supported_formats = ['hex', 'base64']
+    output_format_lower = output_format.lower()
+    if output_format_lower not in supported_formats:
+        raise ValueError(
+            f"Unsupported output format: '{output_format}'. "
+            f"Supported formats are: {', '.join(supported_formats)}"
+        )
+    
+    # Get hash function and metadata
+    hash_func, hash_size_bits, security_note = supported_algorithms[algorithm_lower]
+    
+    # Compute hash
+    hash_obj = hash_func()
+    hash_obj.update(data_bytes)
+    
+    # Format output
+    if output_format_lower == 'hex':
+        hash_value = hash_obj.hexdigest()
+    else:  # base64
+        hash_value = base64.b64encode(hash_obj.digest()).decode('utf-8')
+    
+    # Return comprehensive result with metadata
+    return {
+        'hash': hash_value,
+        'algorithm': algorithm_lower,
+        'output_format': output_format_lower,
+        'input_size': data_size,
+        'hash_size': hash_size_bits,
+        'security_note': security_note
+    }
+
+
 # Initialize the MCP server with a descriptive name
 app = Server("fibonacci-calculator")
 
@@ -1276,6 +1426,36 @@ async def list_tools() -> list[Tool]:
                 "required": ["n"],
             },
         ),
+        Tool(
+            name="generate_hash",
+            description=(
+                "Generate cryptographic hash of text or data using various algorithms. "
+                "Supports MD5, SHA-1, SHA-256, SHA-512, and BLAKE2b with hex or base64 output. "
+                "Includes security notes and recommendations for each algorithm. "
+                "WARNING: MD5 and SHA-1 are not cryptographically secure - use SHA-256+ for security."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "string",
+                        "description": "Input text or data to hash (max 1MB)",
+                    },
+                    "algorithm": {
+                        "type": "string",
+                        "description": "Hash algorithm to use",
+                        "enum": ["md5", "sha1", "sha256", "sha512", "blake2b"],
+                    },
+                    "output_format": {
+                        "type": "string",
+                        "description": "Output format for the hash (default: hex)",
+                        "enum": ["hex", "base64"],
+                        "default": "hex",
+                    },
+                },
+                "required": ["data", "algorithm"],
+            },
+        ),
     ]
 
 
@@ -1327,6 +1507,8 @@ async def call_tool(name: str, arguments: Any) -> CallToolResult:
             return await handle_perfect_numbers(arguments)
         elif name == "collatz_sequence":
             return await handle_collatz_sequence(arguments)
+        elif name == "generate_hash":
+            return await handle_generate_hash(arguments)
         else:
             logger.error(f"Unknown tool requested: {name}")
             return CallToolResult(
@@ -2317,6 +2499,103 @@ async def handle_collatz_sequence(arguments: Any) -> CallToolResult:
         content=[TextContent(type="text", text=result_text)],
         isError=False,
     )
+
+
+async def handle_generate_hash(arguments: Any) -> CallToolResult:
+    """Handle generate_hash tool calls."""
+    # Extract parameters
+    data = arguments.get("data")
+    algorithm = arguments.get("algorithm")
+    output_format = arguments.get("output_format", "hex")
+    
+    # Validate required parameters
+    if data is None:
+        logger.error("Missing required parameter: data")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text="Missing required parameter 'data'"
+            )],
+            isError=True,
+        )
+    
+    if algorithm is None:
+        logger.error("Missing required parameter: algorithm")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text="Missing required parameter 'algorithm'"
+            )],
+            isError=True,
+        )
+    
+    # Validate parameter types
+    if not isinstance(data, str):
+        logger.error(f"Invalid parameter type for data: {type(data)}")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=f"Parameter 'data' must be a string, got {type(data).__name__}"
+            )],
+            isError=True,
+        )
+    
+    if not isinstance(algorithm, str):
+        logger.error(f"Invalid parameter type for algorithm: {type(algorithm)}")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=f"Parameter 'algorithm' must be a string, got {type(algorithm).__name__}"
+            )],
+            isError=True,
+        )
+    
+    if not isinstance(output_format, str):
+        logger.error(f"Invalid parameter type for output_format: {type(output_format)}")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=f"Parameter 'output_format' must be a string, got {type(output_format).__name__}"
+            )],
+            isError=True,
+        )
+    
+    # Generate hash
+    try:
+        logger.info(f"Generating {algorithm} hash for {len(data)} bytes of data, output format: {output_format}")
+        result = generate_hash(data, algorithm, output_format)
+        
+        # Format the result
+        result_text = (
+            f"Hash generated successfully:\n\n"
+            f"Algorithm: {result['algorithm'].upper()}\n"
+            f"Hash ({result['output_format']}): {result['hash']}\n\n"
+            f"Input size: {result['input_size']:,} bytes\n"
+            f"Hash size: {result['hash_size']} bits\n\n"
+            f"Security Note:\n{result['security_note']}"
+        )
+        
+        # Add password warning for weak hashes
+        if result['algorithm'] in ['md5', 'sha1']:
+            result_text += (
+                "\n\n⚠️ IMPORTANT: Do NOT use this hash for passwords or security-critical applications. "
+                "Use SHA-256 or SHA-512 with proper salt and key derivation functions (PBKDF2, bcrypt, Argon2)."
+            )
+        
+        logger.info(f"Successfully generated {algorithm} hash: {result['hash'][:16]}...")
+        
+        return CallToolResult(
+            content=[TextContent(type="text", text=result_text)],
+            isError=False,
+        )
+        
+    except ValueError as e:
+        # Handle validation errors from generate_hash
+        logger.error(f"Hash generation error: {e}")
+        return CallToolResult(
+            content=[TextContent(type="text", text=f"Hash generation error: {str(e)}")],
+            isError=True,
+        )
 
 
 async def main():
