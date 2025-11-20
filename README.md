@@ -1,18 +1,40 @@
-# Mathematical Tools MCP Server
+# Mathematical & Statistical Tools MCP Servers
 
-A complete Model Context Protocol (MCP) server implementation in Python that provides mathematical calculation tools for AI assistants like Claude Desktop and other MCP-compatible clients.
+A complete Model Context Protocol (MCP) server implementation in Python that provides mathematical calculation and statistical analysis tools for AI assistants like Claude Desktop and other MCP-compatible clients.
 
-## 🌟 Features
+## 🏗️ Architecture
 
+This repository contains **two specialized MCP servers**:
+
+### 1. **Math Calculator Server** (`src/math_server/`)
+Mathematical calculations, sequences, and utility tools:
 - **Fibonacci Calculations**: Calculate individual Fibonacci numbers or generate complete sequences
 - **Prime Number Tools**: Check primality, generate primes, find nth prime, and factorize numbers
 - **Number Theory Tools**: GCD, LCM, factorial, combinations, and permutations
 - **Sequence Generators**: Pascal's triangle, triangular numbers, perfect numbers, and Collatz sequences
-- **Statistical Analysis**: Descriptive statistics, correlation analysis, percentile calculations, and outlier detection
 - **Cryptographic Hash Generator**: Generate MD5, SHA-1, SHA-256, SHA-512, and BLAKE2b hashes with security notes
-- **Unit Converter**: Convert between units across 7 categories (length, weight, temperature, volume, time, digital storage, speed) with precise factors
-- **Date Calculator**: Calculate date differences, add/subtract time, count business days, calculate age, and determine day of week with proper leap year handling
-- **Text Processing Tools**: Text statistics, word frequency analysis, text transformations, and encoding/decoding (Base64, Hex, URL)
+- **Unit Converter**: Convert between units across 7 categories (length, weight, temperature, volume, time, digital storage, speed)
+- **Date Calculator**: Calculate date differences, add/subtract time, count business days, calculate age, and day of week
+- **Text Processing Tools**: Text statistics, word frequency analysis, text transformations, and encoding/decoding
+
+### 2. **Statistical Analysis Server** (`src/stats_server/`)
+Dedicated statistical analysis tools:
+- **Descriptive Statistics**: Calculate mean, median, mode, standard deviation, variance, min, max, quartiles, and range
+- **Correlation Analysis**: Pearson correlation coefficient and covariance between two datasets
+- **Percentile Calculations**: Calculate specific percentiles from datasets with linear interpolation
+- **Outlier Detection**: Identify outliers using IQR method with configurable threshold
+
+## 🌟 Benefits of Split Architecture
+
+- **Separation of Concerns**: Mathematical and statistical tools are logically separated
+- **Focused Development**: Easier to extend specific capabilities independently
+- **Performance**: Lighter weight servers with specific purposes
+- **Deployment Flexibility**: Run only the servers you need
+- **Easier Testing**: Isolated testing of specific functionality
+- **Clear Organization**: Each server has a well-defined scope
+
+## 🚀 Key Features
+
 - **High Performance**: Optimized algorithms (Euclidean algorithm, Sieve of Eratosthenes, efficient combinatorics, memoization)
 - **Robust Validation**: Comprehensive error handling and input validation with appropriate ranges
 - **Production Ready**: Full logging, proper error messages, and graceful shutdown
@@ -49,19 +71,23 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 2. Test the Server
+### 2. Test the Servers
 
-Run the server directly to verify it works:
+Run each server directly to verify they work:
 
 ```bash
-python src/fibonacci_server/server.py
+# Test Math Calculator Server
+python src/math_server/server.py
+
+# Test Statistical Analysis Server (in a new terminal)
+python src/stats_server/server.py
 ```
 
-The server will start and wait for MCP protocol messages on stdin. Press `Ctrl+C` to stop.
+Each server will start and wait for MCP protocol messages on stdin. Press `Ctrl+C` to stop.
 
 ### 3. Configure with Claude Desktop
 
-Add the server to Claude Desktop's configuration file:
+Add **both servers** to Claude Desktop's configuration file:
 
 **Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
 **macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
@@ -70,10 +96,16 @@ Add the server to Claude Desktop's configuration file:
 ```json
 {
   "mcpServers": {
-    "fibonacci": {
+    "math-tools": {
       "command": "c:/Users/YOUR_USERNAME/path/to/MyMCP/venv/Scripts/python.exe",
       "args": [
-        "c:/Users/YOUR_USERNAME/path/to/MyMCP/src/fibonacci_server/server.py"
+        "c:/Users/YOUR_USERNAME/path/to/MyMCP/src/math_server/server.py"
+      ]
+    },
+    "stats-tools": {
+      "command": "c:/Users/YOUR_USERNAME/path/to/MyMCP/venv/Scripts/python.exe",
+      "args": [
+        "c:/Users/YOUR_USERNAME/path/to/MyMCP/src/stats_server/server.py"
       ]
     }
   }
@@ -83,11 +115,12 @@ Add the server to Claude Desktop's configuration file:
 **Important:** 
 - Replace `YOUR_USERNAME` and the path with your actual paths
 - Use forward slashes (`/`) or escaped backslashes (`\\`) in paths
-- Use absolute paths for both the Python executable and server script
+- Use absolute paths for both the Python executable and server scripts
+- You can configure either or both servers based on your needs
 
 ### 4. Restart Claude Desktop
 
-Completely quit Claude Desktop and restart it. The Fibonacci tool should now be available.
+Completely quit Claude Desktop and restart it. Both servers should now be available with their respective tools.
 
 ## 💡 Usage Examples
 
@@ -139,12 +172,12 @@ Once configured, you can interact with the server through Claude:
 
 **⚠️ Security Warning**: MD5 and SHA-1 are cryptographically broken. Use SHA-256 or higher for security purposes. Never use plain hashes for passwords - always use salt and key derivation functions (PBKDF2, bcrypt, Argon2).
 
-### Statistical Analysis
+### Statistical Analysis (Stats Server)
 ```
 "Analyze this data: [23, 45, 12, 67, 34, 89, 23, 56]"
 "What's the correlation between [1, 2, 3, 4, 5] and [2, 4, 6, 8, 10]?"
 "Find the 75th percentile of [10, 20, 30, 40, 50]"
-"Identify outliers in [10, 12, 14, 13, 15, 100, 11, 13, 14]"
+"Identify outliers in [10, 12, 14, 13, 15, 100, 11, 13, 14] using threshold 1.5"
 "Calculate mean and standard deviation for my dataset"
 ```
 
@@ -624,32 +657,35 @@ Once configured, you can interact with the server through Claude:
 - Non-numeric data
 - Empty dataset
 
-### Tool: `outliers`
+### Tool: `detect_outliers`
 
 **Parameters:**
-- `data` (array of numbers, required): Dataset to analyze (1-10000 items)
+- `data` (array of numbers, required): Dataset to analyze (4-10000 items)
+- `threshold` (number, optional, default: 1.5): IQR multiplier (0.1-10, use 1.5 for standard outliers, 3.0 for extreme outliers)
 
 **Response Format:**
 - `outliers`: List of outlier values
 - `indices`: Indices of outliers in original data
 - `count`: Number of outliers
-- `lower_bound`: Lower threshold (Q1 - 1.5×IQR)
-- `upper_bound`: Upper threshold (Q3 + 1.5×IQR)
+- `lower_bound`: Lower threshold (Q1 - threshold×IQR)
+- `upper_bound`: Upper threshold (Q3 + threshold×IQR)
 - `q1`: First quartile (25th percentile)
 - `q3`: Third quartile (75th percentile)
 - `iqr`: Interquartile range (Q3 - Q1)
+- `threshold`: The threshold multiplier used
 
-**Method:** IQR (Interquartile Range) method
+**Method:** IQR (Interquartile Range) method with configurable threshold
 - Calculate Q1 and Q3
 - IQR = Q3 - Q1
-- Lower bound = Q1 - 1.5 × IQR
-- Upper bound = Q3 + 1.5 × IQR
+- Lower bound = Q1 - threshold × IQR
+- Upper bound = Q3 + threshold × IQR
 - Values outside [lower_bound, upper_bound] are outliers
 
 **Examples:**
 ```
-[10, 12, 14, 13, 15, 100, 11, 13, 14] → outliers: [100], count: 1
-[10, 11, 12, 13, 14, 15] → outliers: [], count: 0 (no outliers)
+detect_outliers([10, 12, 14, 13, 15, 100, 11, 13, 14]) → outliers: [100], count: 1
+detect_outliers([10, 11, 12, 13, 14, 15]) → outliers: [], count: 0 (no outliers)
+detect_outliers([10, 12, 14, 13, 15, 100, 11, 13, 14], threshold=3.0) → fewer/different outliers detected
 ```
 
 **Algorithm:** Uses percentile calculations with O(n log n) complexity
@@ -1034,9 +1070,12 @@ encode_decode("Hello World!", "encode", "url") → "Hello%20World%21"
 ```
 MyMCP/
 ├── src/
-│   └── fibonacci_server/
+│   ├── math_server/             # Mathematical tools MCP server
+│   │   ├── __init__.py          # Package initialization
+│   │   └── server.py            # Math calculator server implementation
+│   └── stats_server/            # Statistical analysis MCP server
 │       ├── __init__.py          # Package initialization
-│       └── server.py            # Main MCP server implementation
+│       └── server.py            # Statistical tools server implementation
 ├── venv/                        # Virtual environment (created during setup)
 ├── .env.example                 # Environment variable template
 ├── .gitignore                   # Git ignore patterns
@@ -1052,21 +1091,26 @@ MyMCP/
 The MCP Inspector is a web-based tool for testing MCP servers:
 
 ```bash
-npx @modelcontextprotocol/inspector c:/path/to/venv/Scripts/python.exe c:/path/to/src/fibonacci_server/server.py
+# Test Math Calculator Server
+npx @modelcontextprotocol/inspector c:/path/to/venv/Scripts/python.exe c:/path/to/src/math_server/server.py
+
+# Test Statistical Analysis Server
+npx @modelcontextprotocol/inspector c:/path/to/venv/Scripts/python.exe c:/path/to/src/stats_server/server.py
 ```
 
 This will:
 1. Start the MCP Inspector web interface
-2. Launch your Fibonacci server
+2. Launch the selected server
 3. Open a browser at `http://localhost:6274`
 4. Allow you to test tool calls interactively
 
 ### Manual Testing
 
-You can also test the calculations directly in Python:
+You can also test the functions directly in Python:
 
+**Math Server Functions:**
 ```python
-from src.fibonacci_server.server import (
+from src.math_server.server import (
     calculate_fibonacci, 
     calculate_fibonacci_sequence,
     is_prime,
@@ -1083,10 +1127,6 @@ from src.fibonacci_server.server import (
     perfect_numbers,
     collatz_sequence,
     generate_hash,
-    descriptive_stats,
-    correlation,
-    percentile,
-    outliers,
     unit_convert,
     date_diff,
     date_add,
@@ -1097,6 +1137,18 @@ from src.fibonacci_server.server import (
     word_frequency,
     text_transform,
     encode_decode
+)
+
+# Test examples from math server...
+```
+
+**Stats Server Functions:**
+```python
+from src.stats_server.server import (
+    descriptive_stats,
+    correlation,
+    percentile,
+    detect_outliers
 )
 
 # Fibonacci calculations
@@ -1128,13 +1180,13 @@ print(generate_hash("Hello World", "sha256", "hex"))  # Output: {'hash': 'a591a6
 print(generate_hash("password123", "md5", "hex"))  # Output: {'hash': '482c811da5d5b4bc6d497ffa98491e38', ...}
 print(generate_hash("test", "sha512", "base64"))  # Output: Base64-encoded SHA-512 hash
 
-# Statistical analysis tools
+# Statistical analysis tools (from stats_server)
 print(descriptive_stats([23, 45, 12, 67, 34, 89, 23, 56]))  
 # Output: {'mean': 43.625, 'median': 39.5, 'mode': [23], 'range': 77, 'variance': 587.98, 'std_dev': 24.25, ...}
 print(correlation([1, 2, 3, 4, 5], [2, 4, 6, 8, 10]))  
 # Output: {'coefficient': 1.0, 'interpretation': 'Perfect positive correlation'}
 print(percentile([23, 45, 12, 67, 34, 89, 23, 56], 50))  # Output: 39.5 (median)
-print(outliers([10, 12, 14, 13, 15, 100, 11, 13, 14]))  
+print(detect_outliers([10, 12, 14, 13, 15, 100, 11, 13, 14], threshold=1.5))  
 # Output: {'outliers': [100], 'indices': [5], 'count': 1, 'q1': 12.0, 'q3': 14.0, 'iqr': 2.0, ...}
 
 # Unit converter
@@ -1307,7 +1359,7 @@ Example verifications:
 - Request: "Find the 75th percentile of [23, 45, 12, 67, 34, 89, 23, 56]"
 - Expected: 58.75
 
-- Request: "Identify outliers in [10, 12, 14, 13, 15, 100, 11, 13, 14]"
+- Request: "Detect outliers in [10, 12, 14, 13, 15, 100, 11, 13, 14]"
 - Expected: Outliers: [100], Count: 1
 
 - Request: "Convert 100 kilometers to miles"
@@ -1338,6 +1390,8 @@ MIT
 ## 🎓 Educational Value
 
 This project demonstrates:
+- **Multi-server MCP architecture**: Two specialized servers working together
+- **Separation of concerns**: Mathematical vs. statistical domains
 - MCP server implementation from scratch
 - Python async/await patterns
 - JSON-RPC protocol handling
