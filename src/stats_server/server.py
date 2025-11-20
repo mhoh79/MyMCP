@@ -7,6 +7,11 @@ percentile calculations, and outlier detection.
 import asyncio
 import logging
 from typing import Any
+import math
+
+# Scientific computing imports for advanced outlier detection
+import numpy as np
+from scipy import stats
 
 # MCP SDK imports for building the server
 from mcp.server import Server
@@ -526,6 +531,821 @@ def detect_outliers(data: list[float], threshold: float = 1.5) -> dict[str, Any]
         'q3': q3,
         'iqr': iqr,
         'threshold': threshold
+    }
+
+
+# ============================================================================
+# Advanced Outlier Detection Functions
+# ============================================================================
+
+
+def z_score_detection(data: list[float], method: str = "modified", threshold: float = 3.0, two_tailed: bool = True) -> dict[str, Any]:
+    """
+    Detect outliers using Z-score method (standard or modified).
+    
+    Standard Z-score uses mean and standard deviation.
+    Modified Z-score uses median and MAD (Median Absolute Deviation) for robustness.
+    
+    Args:
+        data: Measurements to check for outliers (min 3 items)
+        method: "standard" (mean/std) or "modified" (median/MAD) - modified is more robust
+        threshold: Z-score threshold (typical: 3.0 for standard, 3.5 for modified)
+        two_tailed: Detect outliers on both sides (default: True)
+        
+    Returns:
+        Dictionary containing:
+        - 'method': Method used
+        - 'threshold': Threshold used
+        - 'outliers': Detailed outlier information with indices, values, z-scores, severity
+        - 'statistics': Statistical measures used
+        - 'cleaned_data': Data with outliers removed
+        - 'interpretation': Human-readable summary
+    """
+    # Validate input
+    if not isinstance(data, list):
+        raise ValueError(f"Data must be a list, got {type(data).__name__}")
+    
+    if len(data) < 3:
+        raise ValueError("Data must contain at least 3 items")
+    
+    for i, value in enumerate(data):
+        if not isinstance(value, (int, float)):
+            raise ValueError(f"All data values must be numeric. Item at index {i} is {type(value).__name__}: {value}")
+    
+    if method not in ["standard", "modified"]:
+        raise ValueError(f"method must be 'standard' or 'modified', got '{method}'")
+    
+    if not isinstance(threshold, (int, float)):
+        raise ValueError(f"threshold must be numeric, got {type(threshold).__name__}")
+    
+    if threshold < 1.0 or threshold > 10.0:
+        raise ValueError(f"threshold must be between 1.0 and 10.0, got {threshold}")
+    
+    if not isinstance(two_tailed, bool):
+        raise ValueError(f"two_tailed must be boolean, got {type(two_tailed).__name__}")
+    
+    outlier_details = []
+    outlier_indices = []
+    
+    if method == "standard":
+        # Standard Z-score: (x - mean) / std
+        mean_val = sum(data) / len(data)
+        variance = sum((x - mean_val) ** 2 for x in data) / len(data)
+        std_val = variance ** 0.5
+        
+        if std_val < 1e-10:
+            std_val = 1.0  # Prevent division by zero
+        
+        for i, value in enumerate(data):
+            z_score = (value - mean_val) / std_val
+            
+            is_outlier = False
+            if two_tailed:
+                is_outlier = abs(z_score) > threshold
+            else:
+                is_outlier = z_score > threshold
+            
+            if is_outlier:
+                severity = "extreme" if abs(z_score) > threshold * 1.5 else "moderate"
+                outlier_details.append({
+                    "index": i,
+                    "value": value,
+                    "z_score": z_score,
+                    "severity": severity
+                })
+                outlier_indices.append(i)
+        
+        statistics = {
+            "mean": mean_val,
+            "std_dev": std_val,
+            "total_points": len(data),
+            "outlier_count": len(outlier_details),
+            "outlier_percentage": (len(outlier_details) / len(data)) * 100
+        }
+    
+    else:  # modified
+        # Modified Z-score: 0.6745 * (x - median) / MAD
+        sorted_data = sorted(data)
+        n = len(sorted_data)
+        
+        # Calculate median
+        if n % 2 == 0:
+            median_val = (sorted_data[n // 2 - 1] + sorted_data[n // 2]) / 2
+        else:
+            median_val = sorted_data[n // 2]
+        
+        # Calculate MAD (Median Absolute Deviation)
+        deviations = [abs(x - median_val) for x in data]
+        sorted_dev = sorted(deviations)
+        if len(sorted_dev) % 2 == 0:
+            mad = (sorted_dev[len(sorted_dev) // 2 - 1] + sorted_dev[len(sorted_dev) // 2]) / 2
+        else:
+            mad = sorted_dev[len(sorted_dev) // 2]
+        
+        if mad < 1e-10:
+            mad = 1.0  # Prevent division by zero
+        
+        for i, value in enumerate(data):
+            # Modified Z-score formula
+            modified_z = 0.6745 * (value - median_val) / mad
+            
+            is_outlier = False
+            if two_tailed:
+                is_outlier = abs(modified_z) > threshold
+            else:
+                is_outlier = modified_z > threshold
+            
+            if is_outlier:
+                severity = "extreme" if abs(modified_z) > threshold * 1.5 else "moderate"
+                outlier_details.append({
+                    "index": i,
+                    "value": value,
+                    "z_score": modified_z,
+                    "severity": severity
+                })
+                outlier_indices.append(i)
+        
+        statistics = {
+            "median": median_val,
+            "mad": mad,
+            "total_points": len(data),
+            "outlier_count": len(outlier_details),
+            "outlier_percentage": (len(outlier_details) / len(data)) * 100
+        }
+    
+    # Create cleaned data
+    cleaned_data = [data[i] for i in range(len(data)) if i not in outlier_indices]
+    
+    # Generate interpretation
+    if len(outlier_details) == 0:
+        interpretation = f"No outliers detected using {method} Z-score method."
+    else:
+        interpretation = f"{len(outlier_details)} outliers detected ({statistics['outlier_percentage']:.1f}%). {method.capitalize()} Z-score method used for {'robustness' if method == 'modified' else 'standard detection'}."
+    
+    return {
+        "method": f"{method}_z_score",
+        "threshold": threshold,
+        "outliers": {
+            "indices": outlier_indices,
+            "values": outlier_details
+        },
+        "statistics": statistics,
+        "cleaned_data": cleaned_data,
+        "interpretation": interpretation
+    }
+
+
+def grubbs_test(data: list[float], alpha: float = 0.05, method: str = "two_sided") -> dict[str, Any]:
+    """
+    Statistical test for detecting single outliers in normally distributed data.
+    
+    Grubbs' test (maximum normed residual test) is used to detect a single outlier
+    in a univariate dataset that follows an approximately normal distribution.
+    
+    Args:
+        data: Dataset to test for outliers (min 7 items for valid statistics)
+        alpha: Significance level (typical: 0.05 or 0.01)
+        method: "max" (test maximum), "min" (test minimum), or "two_sided" (test both)
+        
+    Returns:
+        Dictionary containing:
+        - 'test': Test name
+        - 'alpha': Significance level
+        - 'sample_size': Number of data points
+        - 'suspected_outlier': Information about the suspected outlier
+        - 'test_statistic': Calculated Grubbs statistic
+        - 'critical_value': Critical value from t-distribution
+        - 'p_value': Approximate p-value
+        - 'conclusion': Statistical conclusion
+        - 'recommendation': Action recommendation
+    """
+    # Validate input
+    if not isinstance(data, list):
+        raise ValueError(f"Data must be a list, got {type(data).__name__}")
+    
+    if len(data) < 7:
+        raise ValueError("Data must contain at least 7 items for valid Grubbs test")
+    
+    for i, value in enumerate(data):
+        if not isinstance(value, (int, float)):
+            raise ValueError(f"All data values must be numeric. Item at index {i} is {type(value).__name__}: {value}")
+    
+    if not isinstance(alpha, (int, float)):
+        raise ValueError(f"alpha must be numeric, got {type(alpha).__name__}")
+    
+    if alpha < 0.001 or alpha > 0.1:
+        raise ValueError(f"alpha must be between 0.001 and 0.1, got {alpha}")
+    
+    if method not in ["max", "min", "two_sided"]:
+        raise ValueError(f"method must be 'max', 'min', or 'two_sided', got '{method}'")
+    
+    n = len(data)
+    mean_val = sum(data) / n
+    variance = sum((x - mean_val) ** 2 for x in data) / n
+    std_val = variance ** 0.5
+    
+    if std_val < 1e-10:
+        raise ValueError("Cannot perform Grubbs test: data has zero variance")
+    
+    # Find suspected outlier based on method
+    if method == "max" or method == "two_sided":
+        max_val = max(data)
+        max_idx = data.index(max_val)
+        g_max = abs(max_val - mean_val) / std_val
+    else:
+        g_max = 0
+        max_val = None
+        max_idx = None
+    
+    if method == "min" or method == "two_sided":
+        min_val = min(data)
+        min_idx = data.index(min_val)
+        g_min = abs(min_val - mean_val) / std_val
+    else:
+        g_min = 0
+        min_val = None
+        min_idx = None
+    
+    # Determine which is the suspected outlier
+    if method == "two_sided":
+        if g_max > g_min:
+            test_statistic = g_max
+            suspected_value = max_val
+            suspected_index = max_idx
+            side = "maximum"
+        else:
+            test_statistic = g_min
+            suspected_value = min_val
+            suspected_index = min_idx
+            side = "minimum"
+    elif method == "max":
+        test_statistic = g_max
+        suspected_value = max_val
+        suspected_index = max_idx
+        side = "maximum"
+    else:  # min
+        test_statistic = g_min
+        suspected_value = min_val
+        suspected_index = min_idx
+        side = "minimum"
+    
+    # Calculate critical value using t-distribution
+    # Grubbs critical value: ((n-1)/sqrt(n)) * sqrt(t²/(n-2+t²))
+    # where t is the t-distribution value
+    t_alpha = stats.t.ppf(1 - alpha / (2 * n), n - 2)
+    critical_value = ((n - 1) / math.sqrt(n)) * math.sqrt(t_alpha**2 / (n - 2 + t_alpha**2))
+    
+    # Calculate approximate p-value
+    # Using the inverse: t = sqrt((n-2) * G² / ((n-1)² - n*G²))
+    if test_statistic < critical_value:
+        p_value = 1.0  # Not significant
+    else:
+        try:
+            t_stat = math.sqrt((n - 2) * test_statistic**2 / ((n - 1)**2 - n * test_statistic**2))
+            p_value = 2 * n * (1 - stats.t.cdf(t_stat, n - 2))
+            p_value = min(p_value, 1.0)
+        except:
+            p_value = 0.001  # Very significant
+    
+    # Determine conclusion
+    if test_statistic > critical_value:
+        conclusion = f"Reject null hypothesis - value is a significant outlier at α={alpha}"
+        recommendation = f"Remove point {suspected_index} (value: {suspected_value:.4f}) - statistically significant outlier"
+    else:
+        conclusion = f"Fail to reject null hypothesis - no significant outlier detected at α={alpha}"
+        recommendation = f"Retain all data points - no statistically significant outlier found"
+    
+    return {
+        "test": "Grubbs test",
+        "alpha": alpha,
+        "sample_size": n,
+        "suspected_outlier": {
+            "value": suspected_value,
+            "index": suspected_index,
+            "side": side
+        },
+        "test_statistic": test_statistic,
+        "critical_value": critical_value,
+        "p_value": p_value,
+        "conclusion": conclusion,
+        "recommendation": recommendation
+    }
+
+
+def dixon_q_test(data: list[float], alpha: float = 0.05) -> dict[str, Any]:
+    """
+    Dixon Q test for outliers in small datasets (3-30 points).
+    
+    Quick test designed specifically for small sample sizes.
+    Uses gap ratio to identify outliers.
+    
+    Args:
+        data: Small dataset (3-30 points)
+        alpha: Significance level (default: 0.05)
+        
+    Returns:
+        Dictionary containing:
+        - 'test': Test name
+        - 'sample_size': Number of data points
+        - 'suspected_outlier': Information about suspected outlier
+        - 'q_statistic': Calculated Q statistic
+        - 'q_critical': Critical Q value for sample size and alpha
+        - 'conclusion': Test conclusion
+        - 'recommendation': Action recommendation
+    """
+    # Validate input
+    if not isinstance(data, list):
+        raise ValueError(f"Data must be a list, got {type(data).__name__}")
+    
+    if len(data) < 3 or len(data) > 30:
+        raise ValueError("Dixon Q test requires between 3 and 30 data points")
+    
+    for i, value in enumerate(data):
+        if not isinstance(value, (int, float)):
+            raise ValueError(f"All data values must be numeric. Item at index {i} is {type(value).__name__}: {value}")
+    
+    if not isinstance(alpha, (int, float)):
+        raise ValueError(f"alpha must be numeric, got {type(alpha).__name__}")
+    
+    n = len(data)
+    sorted_data = sorted(data)
+    
+    # Dixon Q critical values for α=0.05
+    # Format: {sample_size: critical_value}
+    q_critical_values = {
+        3: 0.941, 4: 0.765, 5: 0.642, 6: 0.560, 7: 0.507,
+        8: 0.554, 9: 0.512, 10: 0.477, 11: 0.576, 12: 0.546,
+        13: 0.521, 14: 0.546, 15: 0.525, 16: 0.507, 17: 0.490,
+        18: 0.475, 19: 0.462, 20: 0.450, 21: 0.440, 22: 0.430,
+        23: 0.421, 24: 0.413, 25: 0.406, 26: 0.399, 27: 0.393,
+        28: 0.387, 29: 0.381, 30: 0.376
+    }
+    
+    # For α=0.01, use different values (more conservative)
+    q_critical_values_01 = {
+        3: 0.988, 4: 0.889, 5: 0.780, 6: 0.698, 7: 0.637,
+        8: 0.683, 9: 0.635, 10: 0.597, 11: 0.679, 12: 0.642,
+        13: 0.615, 14: 0.641, 15: 0.616, 16: 0.595, 17: 0.577,
+        18: 0.561, 19: 0.547, 20: 0.535, 21: 0.524, 22: 0.514,
+        23: 0.505, 24: 0.497, 25: 0.489, 26: 0.486, 27: 0.479,
+        28: 0.472, 29: 0.465, 30: 0.463
+    }
+    
+    # Select appropriate critical value table
+    if abs(alpha - 0.01) < 0.001:
+        q_crit = q_critical_values_01.get(n, 0.463)
+    else:
+        q_crit = q_critical_values.get(n, 0.376)
+    
+    # Calculate Q statistic for both ends
+    # Q = gap / range
+    range_val = sorted_data[-1] - sorted_data[0]
+    
+    if range_val < 1e-10:
+        raise ValueError("Cannot perform Dixon Q test: all values are identical")
+    
+    # Check low end
+    gap_low = sorted_data[1] - sorted_data[0]
+    q_low = gap_low / range_val
+    
+    # Check high end
+    gap_high = sorted_data[-1] - sorted_data[-2]
+    q_high = gap_high / range_val
+    
+    # Determine suspected outlier
+    if q_high > q_low:
+        q_statistic = q_high
+        suspected_value = sorted_data[-1]
+        suspected_index = data.index(sorted_data[-1])
+        position = "high"
+    else:
+        q_statistic = q_low
+        suspected_value = sorted_data[0]
+        suspected_index = data.index(sorted_data[0])
+        position = "low"
+    
+    # Determine conclusion
+    if q_statistic > q_crit:
+        conclusion = f"Outlier detected - reject value (Q={q_statistic:.3f} > Q_critical={q_crit:.3f})"
+        recommendation = f"Repeat measurement or investigate cause for value {suspected_value:.4f} at position {position}"
+    else:
+        conclusion = f"No outlier detected - retain all values (Q={q_statistic:.3f} ≤ Q_critical={q_crit:.3f})"
+        recommendation = "All measurements appear valid at the chosen significance level"
+    
+    return {
+        "test": "Dixon Q test",
+        "sample_size": n,
+        "suspected_outlier": {
+            "value": suspected_value,
+            "index": suspected_index,
+            "position": position
+        },
+        "q_statistic": q_statistic,
+        "q_critical": q_crit,
+        "conclusion": conclusion,
+        "recommendation": recommendation
+    }
+
+
+def isolation_forest(data: list, contamination: float = 0.1, n_estimators: int = 100) -> dict[str, Any]:
+    """
+    Machine learning-based anomaly detection using Isolation Forest.
+    
+    Isolation Forest is effective for complex, multivariate anomaly detection.
+    Works by isolating observations through random partitioning.
+    
+    Args:
+        data: Univariate or multivariate data (min 10 items)
+              Univariate: [x1, x2, x3, ...]
+              Multivariate: [[x1, y1, z1], [x2, y2, z2], ...]
+        contamination: Expected proportion of outliers (0-0.5, default: 0.1)
+        n_estimators: Number of isolation trees (50-500, default: 100)
+        
+    Returns:
+        Dictionary containing:
+        - 'method': Method name
+        - 'anomalies': Detected anomalies with indices and scores
+        - 'contamination': Actual contamination found
+        - 'interpretation': Human-readable summary
+    """
+    # Validate input
+    if not isinstance(data, list):
+        raise ValueError(f"Data must be a list, got {type(data).__name__}")
+    
+    if len(data) < 10:
+        raise ValueError("Data must contain at least 10 items for isolation forest")
+    
+    if not isinstance(contamination, (int, float)):
+        raise ValueError(f"contamination must be numeric, got {type(contamination).__name__}")
+    
+    if contamination < 0.0 or contamination > 0.5:
+        raise ValueError(f"contamination must be between 0.0 and 0.5, got {contamination}")
+    
+    if not isinstance(n_estimators, int):
+        raise ValueError(f"n_estimators must be an integer, got {type(n_estimators).__name__}")
+    
+    if n_estimators < 50 or n_estimators > 500:
+        raise ValueError(f"n_estimators must be between 50 and 500, got {n_estimators}")
+    
+    # Convert data to numpy array and handle univariate vs multivariate
+    try:
+        # Check if data is univariate (list of numbers) or multivariate (list of lists)
+        if isinstance(data[0], (int, float)):
+            # Univariate data - reshape to column vector
+            X = np.array(data).reshape(-1, 1)
+        else:
+            # Multivariate data
+            X = np.array(data)
+            if X.ndim != 2:
+                raise ValueError("Multivariate data must be 2-dimensional")
+    except Exception as e:
+        raise ValueError(f"Failed to convert data to array: {str(e)}")
+    
+    # Import sklearn isolation forest
+    try:
+        from sklearn.ensemble import IsolationForest
+    except ImportError:
+        raise ImportError("sklearn is required for isolation_forest. Install with: pip install scikit-learn")
+    
+    # Fit isolation forest
+    clf = IsolationForest(
+        contamination=contamination,
+        n_estimators=n_estimators,
+        random_state=42,
+        n_jobs=-1
+    )
+    
+    predictions = clf.fit_predict(X)
+    scores = clf.score_samples(X)
+    
+    # Find anomalies (labeled as -1)
+    anomaly_indices = [i for i, pred in enumerate(predictions) if pred == -1]
+    anomaly_scores = [abs(scores[i]) for i in anomaly_indices]
+    
+    # Classify severity based on anomaly score
+    severity_labels = []
+    for score in anomaly_scores:
+        if score > 0.6:
+            severity_labels.append("high")
+        elif score > 0.4:
+            severity_labels.append("medium")
+        else:
+            severity_labels.append("low")
+    
+    actual_contamination = len(anomaly_indices) / len(data)
+    
+    interpretation = f"{len(anomaly_indices)} anomalies detected ({actual_contamination*100:.1f}% of data). Isolation scores indicate how isolated each point is from normal patterns."
+    
+    return {
+        "method": "Isolation Forest",
+        "anomalies": {
+            "indices": anomaly_indices,
+            "anomaly_scores": anomaly_scores,
+            "severity": severity_labels
+        },
+        "contamination": actual_contamination,
+        "interpretation": interpretation
+    }
+
+
+def mahalanobis_distance(data: list[list[float]], threshold: float = 0.975) -> dict[str, Any]:
+    """
+    Multivariate outlier detection using Mahalanobis distance.
+    
+    Mahalanobis distance considers correlations between variables,
+    making it effective for detecting outliers in multivariate datasets.
+    
+    Args:
+        data: Multivariate data [[x1, y1, z1], [x2, y2, z2], ...] (min 10 items)
+        threshold: Chi-square threshold percentile (0.9-0.999, default: 0.975)
+        
+    Returns:
+        Dictionary containing:
+        - 'method': Method name
+        - 'dimensions': Number of variables
+        - 'outliers': Outlier details with distances and p-values
+        - 'threshold_distance': Critical distance threshold
+        - 'degrees_of_freedom': Degrees of freedom (number of dimensions)
+        - 'interpretation': Human-readable summary
+        - 'variable_contributions': Which variables contribute most to outliers
+    """
+    # Validate input
+    if not isinstance(data, list):
+        raise ValueError(f"Data must be a list, got {type(data).__name__}")
+    
+    if len(data) < 10:
+        raise ValueError("Data must contain at least 10 items")
+    
+    if not isinstance(threshold, (int, float)):
+        raise ValueError(f"threshold must be numeric, got {type(threshold).__name__}")
+    
+    if threshold < 0.9 or threshold > 0.999:
+        raise ValueError(f"threshold must be between 0.9 and 0.999, got {threshold}")
+    
+    # Convert to numpy array
+    try:
+        X = np.array(data)
+        if X.ndim != 2:
+            raise ValueError("Data must be 2-dimensional (multivariate)")
+    except Exception as e:
+        raise ValueError(f"Failed to convert data to array: {str(e)}")
+    
+    n_samples, n_features = X.shape
+    
+    if n_features < 2:
+        raise ValueError("Mahalanobis distance requires at least 2 variables (multivariate data)")
+    
+    # Calculate mean and covariance matrix
+    mean_vec = np.mean(X, axis=0)
+    cov_matrix = np.cov(X, rowvar=False)
+    
+    # Handle singular covariance matrix
+    try:
+        inv_cov_matrix = np.linalg.inv(cov_matrix)
+    except np.linalg.LinAlgError:
+        # Use pseudo-inverse if matrix is singular
+        inv_cov_matrix = np.linalg.pinv(cov_matrix)
+    
+    # Calculate Mahalanobis distance for each point
+    distances = []
+    for i in range(n_samples):
+        diff = X[i] - mean_vec
+        distance = np.sqrt(diff @ inv_cov_matrix @ diff.T)
+        distances.append(distance)
+    
+    # Determine threshold using chi-square distribution
+    # Mahalanobis distance squared follows chi-square distribution
+    chi2_threshold = stats.chi2.ppf(threshold, n_features)
+    distance_threshold = np.sqrt(chi2_threshold)
+    
+    # Find outliers
+    outlier_info = []
+    outlier_indices = []
+    
+    for i, dist in enumerate(distances):
+        if dist > distance_threshold:
+            # Calculate p-value
+            p_value = 1 - stats.chi2.cdf(dist**2, n_features)
+            
+            outlier_info.append({
+                "index": i,
+                "distance": dist,
+                "p_value": p_value
+            })
+            outlier_indices.append(i)
+    
+    # For outliers, determine which variable contributes most
+    variable_contributions = []
+    for i in outlier_indices:
+        diff = X[i] - mean_vec
+        # Contribution of each variable (squared standardized difference)
+        contributions = (diff**2) / np.diag(cov_matrix)
+        primary_var_idx = np.argmax(contributions)
+        contribution_pct = contributions[primary_var_idx] / np.sum(contributions)
+        
+        variable_contributions.append({
+            "index": i,
+            "primary_variable": f"variable_{primary_var_idx}",
+            "contribution": contribution_pct
+        })
+    
+    interpretation = f"{len(outlier_indices)} multivariate outliers detected. These points are unusual in the combined context of all {n_features} variables."
+    
+    return {
+        "method": "Mahalanobis Distance",
+        "dimensions": n_features,
+        "outliers": {
+            "indices": outlier_indices,
+            "distances": outlier_info
+        },
+        "threshold_distance": distance_threshold,
+        "degrees_of_freedom": n_features,
+        "interpretation": interpretation,
+        "variable_contributions": variable_contributions
+    }
+
+
+def streaming_outlier_detection(current_value: float, historical_window: list[float], 
+                                method: str = "ewma", sensitivity: int = 5) -> dict[str, Any]:
+    """
+    Real-time outlier detection for continuous sensor streams.
+    
+    Designed for real-time SCADA systems and continuous process monitoring.
+    
+    Args:
+        current_value: New measurement to evaluate
+        historical_window: Recent historical values for context (10-1000 items)
+        method: Detection method - "ewma", "cusum", or "adaptive_threshold"
+        sensitivity: Detection sensitivity (1-10, higher = more sensitive, default: 5)
+        
+    Returns:
+        Dictionary containing:
+        - 'current_value': Value being evaluated
+        - 'is_outlier': Whether current value is an outlier
+        - 'severity': Severity level ("normal", "warning", "critical")
+        - 'method': Method used
+        - 'expected_range': Expected value range
+        - 'deviation': How much current value deviates
+        - 'deviation_sigma': Deviation in standard deviations
+        - 'interpretation': Human-readable interpretation
+        - 'recommendation': Action recommendation
+        - 'trend': Trend direction ("increasing", "decreasing", "stable")
+        - 'rate_of_change': Rate of change from last value
+    """
+    # Validate input
+    if not isinstance(current_value, (int, float)):
+        raise ValueError(f"current_value must be numeric, got {type(current_value).__name__}")
+    
+    if not isinstance(historical_window, list):
+        raise ValueError(f"historical_window must be a list, got {type(historical_window).__name__}")
+    
+    if len(historical_window) < 10 or len(historical_window) > 1000:
+        raise ValueError("historical_window must contain between 10 and 1000 items")
+    
+    for i, value in enumerate(historical_window):
+        if not isinstance(value, (int, float)):
+            raise ValueError(f"All historical_window values must be numeric. Item at index {i} is {type(value).__name__}")
+    
+    if method not in ["ewma", "cusum", "adaptive_threshold"]:
+        raise ValueError(f"method must be 'ewma', 'cusum', or 'adaptive_threshold', got '{method}'")
+    
+    if not isinstance(sensitivity, int):
+        raise ValueError(f"sensitivity must be an integer, got {type(sensitivity).__name__}")
+    
+    if sensitivity < 1 or sensitivity > 10:
+        raise ValueError(f"sensitivity must be between 1 and 10, got {sensitivity}")
+    
+    # Calculate baseline statistics
+    mean_hist = sum(historical_window) / len(historical_window)
+    variance_hist = sum((x - mean_hist) ** 2 for x in historical_window) / len(historical_window)
+    std_hist = variance_hist ** 0.5
+    
+    if std_hist < 1e-10:
+        std_hist = 1.0
+    
+    # Map sensitivity to threshold (inverse relationship)
+    # Higher sensitivity = lower threshold = more sensitive
+    base_threshold = 3.0 - (sensitivity - 5) * 0.3
+    
+    is_outlier = False
+    severity = "normal"
+    expected_range = [mean_hist - base_threshold * std_hist, mean_hist + base_threshold * std_hist]
+    
+    if method == "ewma":
+        # Exponentially Weighted Moving Average
+        alpha = 0.2  # Smoothing factor
+        ewma = historical_window[0]
+        for val in historical_window[1:]:
+            ewma = alpha * val + (1 - alpha) * ewma
+        
+        expected_value = ewma
+        expected_range = [ewma - base_threshold * std_hist, ewma + base_threshold * std_hist]
+        
+        deviation = abs(current_value - expected_value)
+        deviation_sigma = deviation / std_hist
+        
+        if current_value < expected_range[0] or current_value > expected_range[1]:
+            is_outlier = True
+            if deviation_sigma > base_threshold * 1.5:
+                severity = "critical"
+            else:
+                severity = "warning"
+    
+    elif method == "cusum":
+        # Cumulative Sum control chart
+        target = mean_hist
+        k = 0.5 * std_hist  # Allowable slack
+        h = base_threshold * std_hist  # Decision interval
+        
+        cusum_pos = 0
+        cusum_neg = 0
+        
+        for val in historical_window:
+            cusum_pos = max(0, cusum_pos + (val - target - k))
+            cusum_neg = max(0, cusum_neg - (val - target - k))
+        
+        # Check current value
+        cusum_pos_current = max(0, cusum_pos + (current_value - target - k))
+        cusum_neg_current = max(0, cusum_neg - (current_value - target - k))
+        
+        deviation = abs(current_value - target)
+        deviation_sigma = deviation / std_hist
+        
+        if cusum_pos_current > h or cusum_neg_current > h:
+            is_outlier = True
+            if deviation_sigma > base_threshold * 1.5:
+                severity = "critical"
+            else:
+                severity = "warning"
+        
+        expected_range = [target - h, target + h]
+    
+    else:  # adaptive_threshold
+        # Adaptive threshold based on recent behavior
+        recent_window = historical_window[-min(20, len(historical_window)):]
+        recent_mean = sum(recent_window) / len(recent_window)
+        recent_variance = sum((x - recent_mean) ** 2 for x in recent_window) / len(recent_window)
+        recent_std = recent_variance ** 0.5
+        
+        if recent_std < 1e-10:
+            recent_std = 1.0
+        
+        # Adaptive threshold adjusts based on recent volatility
+        adaptive_factor = recent_std / std_hist if std_hist > 1e-10 else 1.0
+        adjusted_threshold = base_threshold * adaptive_factor
+        
+        expected_range = [recent_mean - adjusted_threshold * recent_std, 
+                         recent_mean + adjusted_threshold * recent_std]
+        
+        deviation = abs(current_value - recent_mean)
+        deviation_sigma = deviation / recent_std
+        
+        if current_value < expected_range[0] or current_value > expected_range[1]:
+            is_outlier = True
+            if deviation_sigma > adjusted_threshold * 1.5:
+                severity = "critical"
+            else:
+                severity = "warning"
+    
+    # Calculate trend
+    if len(historical_window) >= 5:
+        recent_5 = historical_window[-5:]
+        trend_slope = (recent_5[-1] - recent_5[0]) / 5
+        if abs(trend_slope) < 0.1 * std_hist:
+            trend = "stable"
+        elif trend_slope > 0:
+            trend = "increasing"
+        else:
+            trend = "decreasing"
+    else:
+        trend = "stable"
+    
+    # Rate of change from last value
+    rate_of_change = current_value - historical_window[-1]
+    
+    # Generate interpretation and recommendation
+    if is_outlier:
+        interpretation = f"Current value {current_value:.2f} exceeds expected range [{expected_range[0]:.2f}, {expected_range[1]:.2f}] by {deviation_sigma:.1f} standard deviations"
+        if severity == "critical":
+            recommendation = "IMMEDIATE ACTION REQUIRED: Investigate sensor or process condition"
+        else:
+            recommendation = "Investigate sensor or process condition"
+    else:
+        interpretation = f"Current value {current_value:.2f} is within expected range [{expected_range[0]:.2f}, {expected_range[1]:.2f}]"
+        recommendation = "Continue normal monitoring"
+    
+    return {
+        "current_value": current_value,
+        "is_outlier": is_outlier,
+        "severity": severity,
+        "method": method,
+        "expected_range": expected_range,
+        "deviation": deviation if is_outlier else 0.0,
+        "deviation_sigma": deviation_sigma if is_outlier else 0.0,
+        "interpretation": interpretation,
+        "recommendation": recommendation,
+        "trend": trend,
+        "rate_of_change": rate_of_change
     }
 
 
@@ -1651,6 +2471,202 @@ async def list_tools() -> list[Tool]:
                 },
                 "required": ["data", "window_size"]
             }
+        ),
+        Tool(
+            name="z_score_detection",
+            description=(
+                "Detect outliers using Z-score methods (standard or modified). "
+                "Standard uses mean/std, Modified uses median/MAD for robustness. "
+                "Use cases: normally distributed process variables (temperature, pressure), "
+                "quick screening of large datasets, real-time sensor validation, quality control."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Measurements to check for outliers",
+                        "minItems": 3
+                    },
+                    "method": {
+                        "type": "string",
+                        "enum": ["standard", "modified"],
+                        "default": "modified",
+                        "description": "Standard (mean/std) or Modified (median/MAD) - modified is more robust"
+                    },
+                    "threshold": {
+                        "type": "number",
+                        "description": "Z-score threshold (typical: 3.0 for standard, 3.5 for modified)",
+                        "minimum": 1.0,
+                        "maximum": 10.0,
+                        "default": 3.0
+                    },
+                    "two_tailed": {
+                        "type": "boolean",
+                        "description": "Detect outliers on both sides",
+                        "default": True
+                    }
+                },
+                "required": ["data"]
+            }
+        ),
+        Tool(
+            name="grubbs_test",
+            description=(
+                "Statistical test for single outliers in normally distributed data. "
+                "Use cases: reject suspicious calibration points, validate lab test results, "
+                "quality control for precise measurements, statistical rigor for critical decisions, "
+                "regulatory compliance (FDA, ISO)."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Dataset to test for outliers",
+                        "minItems": 7
+                    },
+                    "alpha": {
+                        "type": "number",
+                        "description": "Significance level (typical: 0.05 or 0.01)",
+                        "minimum": 0.001,
+                        "maximum": 0.1,
+                        "default": 0.05
+                    },
+                    "method": {
+                        "type": "string",
+                        "enum": ["max", "min", "two_sided"],
+                        "default": "two_sided",
+                        "description": "Test for maximum outlier, minimum outlier, or both"
+                    }
+                },
+                "required": ["data"]
+            }
+        ),
+        Tool(
+            name="dixon_q_test",
+            description=(
+                "Quick test for outliers in small datasets (3-30 points). "
+                "Use cases: laboratory quality control (small sample sizes), pilot plant trials, "
+                "expensive test results validation, duplicate/triplicate measurement validation, "
+                "shift sample validation."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Small dataset (3-30 points)",
+                        "minItems": 3,
+                        "maxItems": 30
+                    },
+                    "alpha": {
+                        "type": "number",
+                        "description": "Significance level",
+                        "default": 0.05
+                    }
+                },
+                "required": ["data"]
+            }
+        ),
+        Tool(
+            name="isolation_forest",
+            description=(
+                "Machine learning-based anomaly detection for complex datasets. "
+                "Use cases: multivariate anomaly detection (multiple sensors), complex process behavior, "
+                "equipment failure prediction, cyber security (unusual patterns), unstructured anomaly patterns."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "description": "Univariate or multivariate data [[x1, x2, x3], ...] or [x1, x2, x3, ...]",
+                        "minItems": 10
+                    },
+                    "contamination": {
+                        "type": "number",
+                        "description": "Expected proportion of outliers (0-0.5)",
+                        "minimum": 0.0,
+                        "maximum": 0.5,
+                        "default": 0.1
+                    },
+                    "n_estimators": {
+                        "type": "integer",
+                        "description": "Number of isolation trees",
+                        "minimum": 50,
+                        "maximum": 500,
+                        "default": 100
+                    }
+                },
+                "required": ["data"]
+            }
+        ),
+        Tool(
+            name="mahalanobis_distance",
+            description=(
+                "Multivariate outlier detection considering correlations between variables. "
+                "Use cases: multiple correlated sensor detection, process state monitoring, "
+                "multivariate quality control, equipment health monitoring, pattern recognition."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "description": "Multivariate data [[x1, y1, z1], [x2, y2, z2], ...]",
+                        "minItems": 10
+                    },
+                    "threshold": {
+                        "type": "number",
+                        "description": "Chi-square threshold percentile (0-1)",
+                        "minimum": 0.9,
+                        "maximum": 0.999,
+                        "default": 0.975
+                    }
+                },
+                "required": ["data"]
+            }
+        ),
+        Tool(
+            name="streaming_outlier_detection",
+            description=(
+                "Real-time outlier detection for continuous sensor streams. "
+                "Use cases: real-time SCADA alarming, edge device data validation, "
+                "continuous process monitoring, high-frequency sensor data, telemetry validation."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "current_value": {
+                        "type": "number",
+                        "description": "New measurement to evaluate"
+                    },
+                    "historical_window": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Recent historical values for context",
+                        "minItems": 10,
+                        "maxItems": 1000
+                    },
+                    "method": {
+                        "type": "string",
+                        "enum": ["ewma", "cusum", "adaptive_threshold"],
+                        "default": "ewma"
+                    },
+                    "sensitivity": {
+                        "type": "integer",
+                        "description": "Detection sensitivity (1-10, higher = more sensitive)",
+                        "minimum": 1,
+                        "maximum": 10,
+                        "default": 5
+                    }
+                },
+                "required": ["current_value", "historical_window"]
+            }
         )
     ]
 
@@ -1695,6 +2711,18 @@ async def call_tool(name: str, arguments: Any) -> CallToolResult:
             return await handle_rate_of_change(arguments)
         elif name == "rolling_statistics":
             return await handle_rolling_statistics(arguments)
+        elif name == "z_score_detection":
+            return await handle_z_score_detection(arguments)
+        elif name == "grubbs_test":
+            return await handle_grubbs_test(arguments)
+        elif name == "dixon_q_test":
+            return await handle_dixon_q_test(arguments)
+        elif name == "isolation_forest":
+            return await handle_isolation_forest(arguments)
+        elif name == "mahalanobis_distance":
+            return await handle_mahalanobis_distance(arguments)
+        elif name == "streaming_outlier_detection":
+            return await handle_streaming_outlier_detection(arguments)
         else:
             # Unknown tool name
             logger.error(f"Unknown tool requested: {name}")
@@ -2451,6 +3479,399 @@ async def handle_rolling_statistics(arguments: Any) -> CallToolResult:
         logger.error(f"Validation error: {e}")
         return CallToolResult(
             content=[TextContent(type="text", text=f"Validation error: {str(e)}")],
+            isError=True,
+        )
+
+
+async def handle_z_score_detection(arguments: Any) -> CallToolResult:
+    """Handle z_score_detection tool calls."""
+    # Extract and validate parameters
+    data = arguments.get("data")
+    method = arguments.get("method", "modified")
+    threshold = arguments.get("threshold", 3.0)
+    two_tailed = arguments.get("two_tailed", True)
+    
+    # Validate required parameter
+    if data is None:
+        logger.error("Missing required parameter: data")
+        return CallToolResult(
+            content=[TextContent(type="text", text="Missing required parameter 'data'")],
+            isError=True,
+        )
+    
+    # Calculate z-score outlier detection
+    try:
+        logger.info(f"Detecting outliers using {method} Z-score method")
+        result = z_score_detection(data, method, threshold, two_tailed)
+        
+        # Format the result
+        result_text = f"Z-Score Outlier Detection ({result['method'].replace('_', ' ').title()}):\n\n"
+        
+        outlier_count = result['statistics']['outlier_count']
+        if outlier_count == 0:
+            result_text += f"✓ No outliers detected\n\n"
+        else:
+            result_text += f"⚠ Found {outlier_count} outlier(s):\n"
+            for detail in result['outliers']['values']:
+                result_text += f"  • Index {detail['index']}: Value {detail['value']:.4f}\n"
+                result_text += f"    Z-score: {detail['z_score']:.4f}, Severity: {detail['severity']}\n"
+            result_text += "\n"
+        
+        result_text += f"Statistics:\n"
+        if method == "standard":
+            result_text += f"  Mean: {result['statistics']['mean']:.4f}\n"
+            result_text += f"  Std Dev: {result['statistics']['std_dev']:.4f}\n"
+        else:
+            result_text += f"  Median: {result['statistics']['median']:.4f}\n"
+            result_text += f"  MAD: {result['statistics']['mad']:.4f}\n"
+        
+        result_text += f"  Total Points: {result['statistics']['total_points']}\n"
+        result_text += f"  Outlier Percentage: {result['statistics']['outlier_percentage']:.1f}%\n\n"
+        
+        result_text += f"Configuration:\n"
+        result_text += f"  Method: {method}\n"
+        result_text += f"  Threshold: {threshold}\n"
+        result_text += f"  Two-tailed: {two_tailed}\n\n"
+        
+        result_text += f"Interpretation:\n  {result['interpretation']}"
+        
+        logger.info(f"Found {outlier_count} outliers")
+        
+        return CallToolResult(
+            content=[TextContent(type="text", text=result_text)],
+            isError=False,
+        )
+        
+    except (ValueError, ImportError) as e:
+        logger.error(f"Error: {e}")
+        return CallToolResult(
+            content=[TextContent(type="text", text=f"Error: {str(e)}")],
+            isError=True,
+        )
+
+
+async def handle_grubbs_test(arguments: Any) -> CallToolResult:
+    """Handle grubbs_test tool calls."""
+    # Extract and validate parameters
+    data = arguments.get("data")
+    alpha = arguments.get("alpha", 0.05)
+    method = arguments.get("method", "two_sided")
+    
+    # Validate required parameter
+    if data is None:
+        logger.error("Missing required parameter: data")
+        return CallToolResult(
+            content=[TextContent(type="text", text="Missing required parameter 'data'")],
+            isError=True,
+        )
+    
+    # Perform Grubbs test
+    try:
+        logger.info(f"Performing Grubbs test with alpha={alpha}")
+        result = grubbs_test(data, alpha, method)
+        
+        # Format the result
+        result_text = f"Grubbs Test for Outliers:\n\n"
+        
+        result_text += f"Configuration:\n"
+        result_text += f"  Significance Level (α): {result['alpha']}\n"
+        result_text += f"  Sample Size: {result['sample_size']}\n"
+        result_text += f"  Method: {method}\n\n"
+        
+        result_text += f"Suspected Outlier:\n"
+        result_text += f"  Value: {result['suspected_outlier']['value']:.4f}\n"
+        result_text += f"  Index: {result['suspected_outlier']['index']}\n"
+        result_text += f"  Side: {result['suspected_outlier']['side']}\n\n"
+        
+        result_text += f"Test Results:\n"
+        result_text += f"  Test Statistic (G): {result['test_statistic']:.4f}\n"
+        result_text += f"  Critical Value: {result['critical_value']:.4f}\n"
+        result_text += f"  P-value: {result['p_value']:.4f}\n\n"
+        
+        result_text += f"Conclusion:\n"
+        result_text += f"  {result['conclusion']}\n\n"
+        
+        result_text += f"Recommendation:\n"
+        result_text += f"  {result['recommendation']}"
+        
+        logger.info(f"Grubbs test completed: G={result['test_statistic']:.4f}")
+        
+        return CallToolResult(
+            content=[TextContent(type="text", text=result_text)],
+            isError=False,
+        )
+        
+    except (ValueError, ImportError) as e:
+        logger.error(f"Error: {e}")
+        return CallToolResult(
+            content=[TextContent(type="text", text=f"Error: {str(e)}")],
+            isError=True,
+        )
+
+
+async def handle_dixon_q_test(arguments: Any) -> CallToolResult:
+    """Handle dixon_q_test tool calls."""
+    # Extract and validate parameters
+    data = arguments.get("data")
+    alpha = arguments.get("alpha", 0.05)
+    
+    # Validate required parameter
+    if data is None:
+        logger.error("Missing required parameter: data")
+        return CallToolResult(
+            content=[TextContent(type="text", text="Missing required parameter 'data'")],
+            isError=True,
+        )
+    
+    # Perform Dixon Q test
+    try:
+        logger.info(f"Performing Dixon Q test with alpha={alpha}")
+        result = dixon_q_test(data, alpha)
+        
+        # Format the result
+        result_text = f"Dixon Q Test for Outliers:\n\n"
+        
+        result_text += f"Configuration:\n"
+        result_text += f"  Sample Size: {result['sample_size']} (suitable for small datasets)\n"
+        result_text += f"  Significance Level: {alpha}\n\n"
+        
+        result_text += f"Suspected Outlier:\n"
+        result_text += f"  Value: {result['suspected_outlier']['value']:.4f}\n"
+        result_text += f"  Index: {result['suspected_outlier']['index']}\n"
+        result_text += f"  Position: {result['suspected_outlier']['position']}\n\n"
+        
+        result_text += f"Test Results:\n"
+        result_text += f"  Q Statistic: {result['q_statistic']:.4f}\n"
+        result_text += f"  Q Critical: {result['q_critical']:.4f}\n\n"
+        
+        result_text += f"Conclusion:\n"
+        result_text += f"  {result['conclusion']}\n\n"
+        
+        result_text += f"Recommendation:\n"
+        result_text += f"  {result['recommendation']}"
+        
+        logger.info(f"Dixon Q test completed: Q={result['q_statistic']:.4f}")
+        
+        return CallToolResult(
+            content=[TextContent(type="text", text=result_text)],
+            isError=False,
+        )
+        
+    except (ValueError, ImportError) as e:
+        logger.error(f"Error: {e}")
+        return CallToolResult(
+            content=[TextContent(type="text", text=f"Error: {str(e)}")],
+            isError=True,
+        )
+
+
+async def handle_isolation_forest(arguments: Any) -> CallToolResult:
+    """Handle isolation_forest tool calls."""
+    # Extract and validate parameters
+    data = arguments.get("data")
+    contamination = arguments.get("contamination", 0.1)
+    n_estimators = arguments.get("n_estimators", 100)
+    
+    # Validate required parameter
+    if data is None:
+        logger.error("Missing required parameter: data")
+        return CallToolResult(
+            content=[TextContent(type="text", text="Missing required parameter 'data'")],
+            isError=True,
+        )
+    
+    # Perform Isolation Forest
+    try:
+        logger.info(f"Performing Isolation Forest with contamination={contamination}")
+        result = isolation_forest(data, contamination, n_estimators)
+        
+        # Format the result
+        result_text = f"Isolation Forest Anomaly Detection:\n\n"
+        
+        anomaly_count = len(result['anomalies']['indices'])
+        if anomaly_count == 0:
+            result_text += f"✓ No anomalies detected\n\n"
+        else:
+            result_text += f"⚠ Found {anomaly_count} anomalies:\n"
+            for i, (idx, score, severity) in enumerate(zip(
+                result['anomalies']['indices'][:10],  # Show first 10
+                result['anomalies']['anomaly_scores'][:10],
+                result['anomalies']['severity'][:10]
+            )):
+                result_text += f"  {i+1}. Index {idx}: Score {score:.4f}, Severity: {severity}\n"
+            
+            if anomaly_count > 10:
+                result_text += f"  ... and {anomaly_count - 10} more\n"
+            result_text += "\n"
+        
+        result_text += f"Statistics:\n"
+        result_text += f"  Contamination Rate: {result['contamination']*100:.1f}%\n"
+        result_text += f"  N Estimators: {n_estimators}\n"
+        result_text += f"  Total Data Points: {len(data)}\n\n"
+        
+        result_text += f"Interpretation:\n  {result['interpretation']}\n\n"
+        
+        result_text += f"Use Cases:\n"
+        result_text += f"  • Multivariate anomaly detection\n"
+        result_text += f"  • Complex process behavior patterns\n"
+        result_text += f"  • Equipment failure prediction\n"
+        result_text += f"  • Unstructured anomaly patterns"
+        
+        logger.info(f"Found {anomaly_count} anomalies")
+        
+        return CallToolResult(
+            content=[TextContent(type="text", text=result_text)],
+            isError=False,
+        )
+        
+    except (ValueError, ImportError) as e:
+        logger.error(f"Error: {e}")
+        return CallToolResult(
+            content=[TextContent(type="text", text=f"Error: {str(e)}")],
+            isError=True,
+        )
+
+
+async def handle_mahalanobis_distance(arguments: Any) -> CallToolResult:
+    """Handle mahalanobis_distance tool calls."""
+    # Extract and validate parameters
+    data = arguments.get("data")
+    threshold = arguments.get("threshold", 0.975)
+    
+    # Validate required parameter
+    if data is None:
+        logger.error("Missing required parameter: data")
+        return CallToolResult(
+            content=[TextContent(type="text", text="Missing required parameter 'data'")],
+            isError=True,
+        )
+    
+    # Calculate Mahalanobis distance
+    try:
+        logger.info(f"Calculating Mahalanobis distance with threshold={threshold}")
+        result = mahalanobis_distance(data, threshold)
+        
+        # Format the result
+        result_text = f"Mahalanobis Distance Multivariate Outlier Detection:\n\n"
+        
+        outlier_count = len(result['outliers']['indices'])
+        if outlier_count == 0:
+            result_text += f"✓ No multivariate outliers detected\n\n"
+        else:
+            result_text += f"⚠ Found {outlier_count} multivariate outliers:\n"
+            for detail in result['outliers']['distances']:
+                result_text += f"  • Index {detail['index']}: Distance {detail['distance']:.4f}, "
+                result_text += f"p-value: {detail['p_value']:.4f}\n"
+            result_text += "\n"
+        
+        result_text += f"Configuration:\n"
+        result_text += f"  Dimensions: {result['dimensions']}\n"
+        result_text += f"  Threshold Percentile: {threshold*100:.1f}%\n"
+        result_text += f"  Threshold Distance: {result['threshold_distance']:.4f}\n"
+        result_text += f"  Degrees of Freedom: {result['degrees_of_freedom']}\n\n"
+        
+        if result['variable_contributions']:
+            result_text += f"Variable Contributions (for outliers):\n"
+            for contrib in result['variable_contributions']:
+                result_text += f"  Index {contrib['index']}: Primary variable: {contrib['primary_variable']}, "
+                result_text += f"Contribution: {contrib['contribution']*100:.1f}%\n"
+            result_text += "\n"
+        
+        result_text += f"Interpretation:\n  {result['interpretation']}\n\n"
+        
+        result_text += f"Use Cases:\n"
+        result_text += f"  • Multiple correlated sensor detection\n"
+        result_text += f"  • Process state monitoring\n"
+        result_text += f"  • Multivariate quality control\n"
+        result_text += f"  • Equipment health monitoring"
+        
+        logger.info(f"Found {outlier_count} multivariate outliers")
+        
+        return CallToolResult(
+            content=[TextContent(type="text", text=result_text)],
+            isError=False,
+        )
+        
+    except (ValueError, ImportError) as e:
+        logger.error(f"Error: {e}")
+        return CallToolResult(
+            content=[TextContent(type="text", text=f"Error: {str(e)}")],
+            isError=True,
+        )
+
+
+async def handle_streaming_outlier_detection(arguments: Any) -> CallToolResult:
+    """Handle streaming_outlier_detection tool calls."""
+    # Extract and validate parameters
+    current_value = arguments.get("current_value")
+    historical_window = arguments.get("historical_window")
+    method = arguments.get("method", "ewma")
+    sensitivity = arguments.get("sensitivity", 5)
+    
+    # Validate required parameters
+    if current_value is None:
+        logger.error("Missing required parameter: current_value")
+        return CallToolResult(
+            content=[TextContent(type="text", text="Missing required parameter 'current_value'")],
+            isError=True,
+        )
+    
+    if historical_window is None:
+        logger.error("Missing required parameter: historical_window")
+        return CallToolResult(
+            content=[TextContent(type="text", text="Missing required parameter 'historical_window'")],
+            isError=True,
+        )
+    
+    # Perform streaming outlier detection
+    try:
+        logger.info(f"Performing streaming outlier detection using {method} method")
+        result = streaming_outlier_detection(current_value, historical_window, method, sensitivity)
+        
+        # Format the result
+        result_text = f"Streaming Outlier Detection (Real-time):\n\n"
+        
+        result_text += f"Current Value Assessment:\n"
+        result_text += f"  Value: {result['current_value']:.4f}\n"
+        result_text += f"  Is Outlier: {'YES' if result['is_outlier'] else 'NO'}\n"
+        result_text += f"  Severity: {result['severity'].upper()}\n\n"
+        
+        result_text += f"Analysis:\n"
+        result_text += f"  Method: {result['method'].upper()}\n"
+        result_text += f"  Expected Range: [{result['expected_range'][0]:.4f}, {result['expected_range'][1]:.4f}]\n"
+        
+        if result['is_outlier']:
+            result_text += f"  Deviation: {result['deviation']:.4f}\n"
+            result_text += f"  Deviation (σ): {result['deviation_sigma']:.2f}\n"
+        
+        result_text += f"  Trend: {result['trend']}\n"
+        result_text += f"  Rate of Change: {result['rate_of_change']:.4f}\n\n"
+        
+        result_text += f"Interpretation:\n  {result['interpretation']}\n\n"
+        
+        result_text += f"Recommendation:\n  {result['recommendation']}\n\n"
+        
+        result_text += f"Configuration:\n"
+        result_text += f"  Sensitivity: {sensitivity}/10\n"
+        result_text += f"  Historical Window Size: {len(historical_window)}\n\n"
+        
+        result_text += f"Use Cases:\n"
+        result_text += f"  • Real-time SCADA alarming\n"
+        result_text += f"  • Continuous process monitoring\n"
+        result_text += f"  • High-frequency sensor validation\n"
+        result_text += f"  • Edge device data validation"
+        
+        logger.info(f"Streaming detection: {'OUTLIER' if result['is_outlier'] else 'NORMAL'}")
+        
+        return CallToolResult(
+            content=[TextContent(type="text", text=result_text)],
+            isError=False,
+        )
+        
+    except (ValueError, ImportError) as e:
+        logger.error(f"Error: {e}")
+        return CallToolResult(
+            content=[TextContent(type="text", text=f"Error: {str(e)}")],
             isError=True,
         )
 
