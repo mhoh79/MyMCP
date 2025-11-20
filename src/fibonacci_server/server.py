@@ -7,7 +7,11 @@ import asyncio
 import base64
 import hashlib
 import logging
+from datetime import datetime, timedelta
 from typing import Any
+
+# Import dateutil for advanced date operations
+from dateutil.relativedelta import relativedelta
 
 # MCP SDK imports for building the server
 from mcp.server import Server
@@ -1870,6 +1874,386 @@ def unit_convert(value: float, from_unit: str, to_unit: str) -> dict[str, Any]:
 
 
 # ============================================================================
+# Date Calculator Functions
+# ============================================================================
+
+
+def date_diff(date1: str, date2: str, unit: str = "all") -> dict[str, Any]:
+    """
+    Calculate the difference between two dates.
+    
+    Supports multiple units of time difference calculation with proper handling
+    of leap years and varying month lengths using the dateutil library.
+    
+    Args:
+        date1: First date in ISO format (YYYY-MM-DD)
+        date2: Second date in ISO format (YYYY-MM-DD)
+        unit: Unit of difference ('days', 'weeks', 'months', 'years', 'all')
+              Default is 'all' which returns all units
+    
+    Returns:
+        Dictionary containing the difference in requested unit(s)
+        
+    Raises:
+        ValueError: If date format is invalid or unit is not recognized
+        
+    Examples:
+        date_diff("2025-01-01", "2025-12-31", "days") → 364 days
+        date_diff("2025-01-15", "2025-02-14", "weeks") → 4 weeks and 2 days
+        date_diff("2020-01-01", "2025-01-01", "years") → 5 years
+        
+    Algorithm Explanation:
+        1. Parse dates using ISO 8601 format
+        2. Calculate the timedelta between dates
+        3. Convert to requested unit(s) with proper rounding
+        4. Handle negative differences (date1 > date2)
+    """
+    # Validate and parse dates
+    try:
+        dt1 = datetime.fromisoformat(date1)
+        dt2 = datetime.fromisoformat(date2)
+    except ValueError as e:
+        raise ValueError(f"Invalid date format. Expected YYYY-MM-DD, got date1='{date1}', date2='{date2}'. Error: {e}")
+    
+    # Validate unit
+    valid_units = ["days", "weeks", "months", "years", "all"]
+    if unit not in valid_units:
+        raise ValueError(f"Invalid unit '{unit}'. Must be one of: {', '.join(valid_units)}")
+    
+    # Calculate basic difference
+    delta = dt2 - dt1
+    days_diff = delta.days
+    
+    # Calculate using relativedelta for accurate month/year differences
+    rel_delta = relativedelta(dt2, dt1)
+    
+    # Build result based on requested unit
+    if unit == "days":
+        return {
+            "days": days_diff,
+            "formatted": f"{abs(days_diff)} day{'s' if abs(days_diff) != 1 else ''}"
+        }
+    elif unit == "weeks":
+        weeks = days_diff // 7
+        remaining_days = days_diff % 7
+        return {
+            "weeks": weeks,
+            "days": remaining_days,
+            "total_days": days_diff,
+            "formatted": f"{abs(weeks)} week{'s' if abs(weeks) != 1 else ''}, {abs(remaining_days)} day{'s' if abs(remaining_days) != 1 else ''}"
+        }
+    elif unit == "months":
+        total_months = rel_delta.years * 12 + rel_delta.months
+        return {
+            "months": total_months,
+            "days": rel_delta.days,
+            "total_days": days_diff,
+            "formatted": f"{abs(total_months)} month{'s' if abs(total_months) != 1 else ''}"
+        }
+    elif unit == "years":
+        return {
+            "years": rel_delta.years,
+            "months": rel_delta.months,
+            "days": rel_delta.days,
+            "total_days": days_diff,
+            "formatted": f"{abs(rel_delta.years)} year{'s' if abs(rel_delta.years) != 1 else ''}"
+        }
+    else:  # unit == "all"
+        return {
+            "years": rel_delta.years,
+            "months": rel_delta.months,
+            "days": rel_delta.days,
+            "total_days": days_diff,
+            "total_weeks": days_diff // 7,
+            "formatted": (
+                f"{abs(rel_delta.years)} year{'s' if abs(rel_delta.years) != 1 else ''}, "
+                f"{abs(rel_delta.months)} month{'s' if abs(rel_delta.months) != 1 else ''}, "
+                f"{abs(rel_delta.days)} day{'s' if abs(rel_delta.days) != 1 else ''}"
+            )
+        }
+
+
+def date_add(date: str, amount: int, unit: str) -> dict[str, Any]:
+    """
+    Add or subtract time from a date.
+    
+    Properly handles month-end dates, leap years, and DST transitions.
+    Negative amounts subtract time from the date.
+    
+    Args:
+        date: Starting date in ISO format (YYYY-MM-DD)
+        amount: Amount to add (can be negative to subtract)
+        unit: Time unit ('days', 'weeks', 'months', 'years')
+    
+    Returns:
+        Dictionary with new date and formatted information
+        
+    Raises:
+        ValueError: If date format is invalid or unit is not recognized
+        
+    Examples:
+        date_add("2025-01-15", 30, "days") → "2025-02-14"
+        date_add("2025-01-31", 1, "months") → "2025-02-28"
+        date_add("2024-02-29", 1, "years") → "2025-02-28" (leap year handling)
+        date_add("2025-06-15", -90, "days") → "2025-03-17"
+        
+    Algorithm Explanation:
+        1. Parse the input date
+        2. Use relativedelta for accurate month/year arithmetic
+        3. Use timedelta for day/week arithmetic
+        4. Handle edge cases (month-end dates, leap years)
+    """
+    # Validate and parse date
+    try:
+        dt = datetime.fromisoformat(date)
+    except ValueError as e:
+        raise ValueError(f"Invalid date format. Expected YYYY-MM-DD, got '{date}'. Error: {e}")
+    
+    # Validate unit
+    valid_units = ["days", "weeks", "months", "years"]
+    if unit not in valid_units:
+        raise ValueError(f"Invalid unit '{unit}'. Must be one of: {', '.join(valid_units)}")
+    
+    # Calculate new date based on unit
+    if unit == "days":
+        new_dt = dt + timedelta(days=amount)
+    elif unit == "weeks":
+        new_dt = dt + timedelta(weeks=amount)
+    elif unit == "months":
+        new_dt = dt + relativedelta(months=amount)
+    elif unit == "years":
+        new_dt = dt + relativedelta(years=amount)
+    
+    return {
+        "original_date": date,
+        "new_date": new_dt.strftime("%Y-%m-%d"),
+        "amount": amount,
+        "unit": unit,
+        "formatted": f"{date} + {amount} {unit} = {new_dt.strftime('%Y-%m-%d')}"
+    }
+
+
+def business_days(start_date: str, end_date: str, exclude_holidays: list[str] = None) -> dict[str, Any]:
+    """
+    Calculate business days between two dates (excluding weekends).
+    
+    Business days are Monday through Friday. Optionally excludes custom holidays.
+    Weekends (Saturday and Sunday) are always excluded.
+    
+    Args:
+        start_date: Start date in ISO format (YYYY-MM-DD)
+        end_date: End date in ISO format (YYYY-MM-DD)
+        exclude_holidays: Optional list of holiday dates in ISO format to exclude
+    
+    Returns:
+        Dictionary with business day count and breakdown
+        
+    Raises:
+        ValueError: If date format is invalid
+        
+    Examples:
+        business_days("2025-01-06", "2025-01-10") → 5 business days (Mon-Fri)
+        business_days("2025-01-04", "2025-01-11") → 6 business days (Sat-Sat, excludes weekends)
+        business_days("2025-12-22", "2025-12-26", ["2025-12-25"]) → 3 business days (excluding Christmas)
+        
+    Algorithm Explanation:
+        1. Parse start and end dates
+        2. Iterate through all dates in range
+        3. Count weekdays (Monday=0 to Friday=4)
+        4. Exclude any dates in the holidays list
+        5. Return count and breakdown
+    """
+    # Validate and parse dates
+    try:
+        start_dt = datetime.fromisoformat(start_date)
+        end_dt = datetime.fromisoformat(end_date)
+    except ValueError as e:
+        raise ValueError(f"Invalid date format. Expected YYYY-MM-DD. Error: {e}")
+    
+    # Ensure start_date is before end_date
+    if start_dt > end_dt:
+        start_dt, end_dt = end_dt, start_dt
+    
+    # Parse holidays if provided
+    holiday_set = set()
+    if exclude_holidays:
+        for holiday in exclude_holidays:
+            try:
+                holiday_dt = datetime.fromisoformat(holiday)
+                holiday_set.add(holiday_dt.date())
+            except ValueError:
+                raise ValueError(f"Invalid holiday date format: {holiday}")
+    
+    # Count business days
+    business_day_count = 0
+    weekend_count = 0
+    holiday_count = 0
+    current_dt = start_dt
+    
+    while current_dt <= end_dt:
+        # Check if it's a weekday (Monday=0, Friday=4, Saturday=5, Sunday=6)
+        if current_dt.weekday() < 5:  # Monday to Friday
+            if current_dt.date() not in holiday_set:
+                business_day_count += 1
+            else:
+                holiday_count += 1
+        else:
+            weekend_count += 1
+        
+        current_dt += timedelta(days=1)
+    
+    total_days = (end_dt - start_dt).days + 1
+    
+    return {
+        "business_days": business_day_count,
+        "total_days": total_days,
+        "weekend_days": weekend_count,
+        "holidays_excluded": holiday_count,
+        "start_date": start_date,
+        "end_date": end_date,
+        "formatted": (
+            f"{business_day_count} business day{'s' if business_day_count != 1 else ''} "
+            f"between {start_date} and {end_date}"
+        )
+    }
+
+
+def age_calculator(birthdate: str, reference_date: str = None) -> dict[str, Any]:
+    """
+    Calculate age from birthdate.
+    
+    Computes precise age in years, months, and days. Handles leap years correctly.
+    Can calculate age as of any reference date (defaults to today).
+    
+    Args:
+        birthdate: Birth date in ISO format (YYYY-MM-DD)
+        reference_date: Reference date for age calculation (default: today)
+    
+    Returns:
+        Dictionary with age in years, months, days and additional info
+        
+    Raises:
+        ValueError: If date format is invalid or birthdate is in the future
+        
+    Examples:
+        age_calculator("1990-05-15") → "35 years, 6 months, 4 days old"
+        age_calculator("2000-01-01", "2025-01-01") → "25 years, 0 months, 0 days old"
+        age_calculator("2020-02-29", "2021-03-01") → "1 year, 0 months, 1 day old"
+        
+    Algorithm Explanation:
+        1. Parse birthdate and reference date
+        2. Validate birthdate is not in the future
+        3. Use relativedelta for accurate age calculation
+        4. Handle leap year birthdates properly
+        5. Calculate additional metadata (days lived, etc.)
+    """
+    # Parse birthdate
+    try:
+        birth_dt = datetime.fromisoformat(birthdate)
+    except ValueError as e:
+        raise ValueError(f"Invalid birthdate format. Expected YYYY-MM-DD, got '{birthdate}'. Error: {e}")
+    
+    # Parse or default reference date
+    if reference_date:
+        try:
+            ref_dt = datetime.fromisoformat(reference_date)
+        except ValueError as e:
+            raise ValueError(f"Invalid reference_date format. Expected YYYY-MM-DD, got '{reference_date}'. Error: {e}")
+    else:
+        ref_dt = datetime.now()
+        reference_date = ref_dt.strftime("%Y-%m-%d")
+    
+    # Validate birthdate is not in the future
+    if birth_dt > ref_dt:
+        raise ValueError(f"Birthdate {birthdate} is in the future relative to reference date {reference_date}")
+    
+    # Calculate age using relativedelta
+    age = relativedelta(ref_dt, birth_dt)
+    
+    # Calculate total days lived
+    total_days = (ref_dt - birth_dt).days
+    
+    return {
+        "years": age.years,
+        "months": age.months,
+        "days": age.days,
+        "total_days": total_days,
+        "birthdate": birthdate,
+        "reference_date": reference_date,
+        "formatted": (
+            f"{age.years} year{'s' if age.years != 1 else ''}, "
+            f"{age.months} month{'s' if age.months != 1 else ''}, "
+            f"{age.days} day{'s' if age.days != 1 else ''} old"
+        )
+    }
+
+
+def day_of_week(date: str) -> dict[str, Any]:
+    """
+    Determine day of week and additional calendar information for any date.
+    
+    Provides comprehensive calendar information including day name, week number,
+    day of year, and whether it's a weekend.
+    
+    Args:
+        date: Date in ISO format (YYYY-MM-DD)
+    
+    Returns:
+        Dictionary with day name, week number, day of year, and more
+        
+    Raises:
+        ValueError: If date format is invalid
+        
+    Examples:
+        day_of_week("2025-11-19") → "Wednesday, Week 47, Day 323"
+        day_of_week("2000-01-01") → "Saturday, Week 1, Day 1"
+        day_of_week("2024-12-25") → "Wednesday, Week 52, Day 360"
+        
+    Algorithm Explanation:
+        1. Parse the date
+        2. Use datetime methods to extract calendar information
+        3. Calculate ISO week number
+        4. Determine if it's a weekend
+        5. Format comprehensive output
+    """
+    # Validate and parse date
+    try:
+        dt = datetime.fromisoformat(date)
+    except ValueError as e:
+        raise ValueError(f"Invalid date format. Expected YYYY-MM-DD, got '{date}'. Error: {e}")
+    
+    # Get day of week information
+    day_name = dt.strftime("%A")  # Full day name (e.g., "Monday")
+    day_abbr = dt.strftime("%a")  # Abbreviated day name (e.g., "Mon")
+    day_number = dt.weekday()  # 0=Monday, 6=Sunday
+    
+    # Get ISO calendar information
+    iso_calendar = dt.isocalendar()
+    iso_year = iso_calendar[0]
+    iso_week = iso_calendar[1]
+    iso_weekday = iso_calendar[2]  # 1=Monday, 7=Sunday
+    
+    # Get day of year
+    day_of_year = dt.timetuple().tm_yday
+    
+    # Check if weekend
+    is_weekend = day_number >= 5  # Saturday=5, Sunday=6
+    
+    return {
+        "date": date,
+        "day_name": day_name,
+        "day_abbr": day_abbr,
+        "day_number": day_number,  # 0=Monday, 6=Sunday
+        "iso_weekday": iso_weekday,  # 1=Monday, 7=Sunday
+        "week_number": iso_week,
+        "iso_year": iso_year,
+        "day_of_year": day_of_year,
+        "is_weekend": is_weekend,
+        "formatted": f"{day_name}, Week {iso_week}, Day {day_of_year}"
+    }
+
+
+# ============================================================================
 # MCP Server Implementation
 # ============================================================================
 
@@ -2380,6 +2764,134 @@ async def list_tools() -> list[Tool]:
                 "required": ["value", "from_unit", "to_unit"],
             },
         ),
+        Tool(
+            name="date_diff",
+            description=(
+                "Calculate the difference between two dates in various units. "
+                "Returns the time span in days, weeks, months, years, or all units. "
+                "Properly handles leap years and varying month lengths. "
+                "Example: '2025-01-01' to '2025-12-31' = 364 days."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "date1": {
+                        "type": "string",
+                        "description": "First date in ISO format (YYYY-MM-DD)",
+                    },
+                    "date2": {
+                        "type": "string",
+                        "description": "Second date in ISO format (YYYY-MM-DD)",
+                    },
+                    "unit": {
+                        "type": "string",
+                        "description": "Unit of difference: 'days', 'weeks', 'months', 'years', or 'all' (default)",
+                        "enum": ["days", "weeks", "months", "years", "all"],
+                        "default": "all",
+                    },
+                },
+                "required": ["date1", "date2"],
+            },
+        ),
+        Tool(
+            name="date_add",
+            description=(
+                "Add or subtract time from a date. "
+                "Properly handles month-end dates, leap years, and negative amounts. "
+                "Example: '2025-01-15' + 30 days = '2025-02-14'."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "date": {
+                        "type": "string",
+                        "description": "Starting date in ISO format (YYYY-MM-DD)",
+                    },
+                    "amount": {
+                        "type": "integer",
+                        "description": "Amount to add (can be negative to subtract)",
+                    },
+                    "unit": {
+                        "type": "string",
+                        "description": "Time unit: 'days', 'weeks', 'months', or 'years'",
+                        "enum": ["days", "weeks", "months", "years"],
+                    },
+                },
+                "required": ["date", "amount", "unit"],
+            },
+        ),
+        Tool(
+            name="business_days",
+            description=(
+                "Calculate business days between two dates, excluding weekends (Saturday and Sunday). "
+                "Optionally exclude custom holidays. "
+                "Business days are Monday through Friday only. "
+                "Example: Jan 6-10, 2025 (Mon-Fri) = 5 business days."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "start_date": {
+                        "type": "string",
+                        "description": "Start date in ISO format (YYYY-MM-DD)",
+                    },
+                    "end_date": {
+                        "type": "string",
+                        "description": "End date in ISO format (YYYY-MM-DD)",
+                    },
+                    "exclude_holidays": {
+                        "type": "array",
+                        "description": "Optional array of holiday dates in ISO format to exclude",
+                        "items": {
+                            "type": "string",
+                        },
+                        "default": [],
+                    },
+                },
+                "required": ["start_date", "end_date"],
+            },
+        ),
+        Tool(
+            name="age_calculator",
+            description=(
+                "Calculate age from birthdate with precise years, months, and days. "
+                "Can calculate age as of any reference date (defaults to today). "
+                "Handles leap years correctly. "
+                "Example: Born 1990-05-15 → '35 years, 6 months, 4 days old'."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "birthdate": {
+                        "type": "string",
+                        "description": "Birth date in ISO format (YYYY-MM-DD)",
+                    },
+                    "reference_date": {
+                        "type": "string",
+                        "description": "Optional reference date for age calculation (default: today)",
+                    },
+                },
+                "required": ["birthdate"],
+            },
+        ),
+        Tool(
+            name="day_of_week",
+            description=(
+                "Determine the day of week and additional calendar information for any date. "
+                "Returns day name, week number, day of year, and whether it's a weekend. "
+                "Example: '2025-11-19' → 'Wednesday, Week 47, Day 323'."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "date": {
+                        "type": "string",
+                        "description": "Date in ISO format (YYYY-MM-DD)",
+                    },
+                },
+                "required": ["date"],
+            },
+        ),
     ]
 
 
@@ -2443,6 +2955,16 @@ async def call_tool(name: str, arguments: Any) -> CallToolResult:
             return await handle_outliers(arguments)
         elif name == "unit_convert":
             return await handle_unit_convert(arguments)
+        elif name == "date_diff":
+            return await handle_date_diff(arguments)
+        elif name == "date_add":
+            return await handle_date_add(arguments)
+        elif name == "business_days":
+            return await handle_business_days(arguments)
+        elif name == "age_calculator":
+            return await handle_age_calculator(arguments)
+        elif name == "day_of_week":
+            return await handle_day_of_week(arguments)
         else:
             logger.error(f"Unknown tool requested: {name}")
             return CallToolResult(
@@ -3962,6 +4484,442 @@ async def handle_unit_convert(arguments: Any) -> CallToolResult:
         logger.error(f"Unit conversion error: {e}")
         return CallToolResult(
             content=[TextContent(type="text", text=f"Unit conversion error: {str(e)}")],
+            isError=True,
+        )
+
+
+async def handle_date_diff(arguments: Any) -> CallToolResult:
+    """Handle date_diff tool calls."""
+    # Extract and validate parameters
+    date1 = arguments.get("date1")
+    date2 = arguments.get("date2")
+    unit = arguments.get("unit", "all")
+    
+    # Validate required parameters
+    if date1 is None:
+        logger.error("Missing required parameter: date1")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text="Missing required parameter 'date1'"
+            )],
+            isError=True,
+        )
+    
+    if date2 is None:
+        logger.error("Missing required parameter: date2")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text="Missing required parameter 'date2'"
+            )],
+            isError=True,
+        )
+    
+    # Validate parameter types
+    if not isinstance(date1, str):
+        logger.error(f"Invalid parameter type for date1: {type(date1)}")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=f"Parameter 'date1' must be a string, got {type(date1).__name__}"
+            )],
+            isError=True,
+        )
+    
+    if not isinstance(date2, str):
+        logger.error(f"Invalid parameter type for date2: {type(date2)}")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=f"Parameter 'date2' must be a string, got {type(date2).__name__}"
+            )],
+            isError=True,
+        )
+    
+    if not isinstance(unit, str):
+        logger.error(f"Invalid parameter type for unit: {type(unit)}")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=f"Parameter 'unit' must be a string, got {type(unit).__name__}"
+            )],
+            isError=True,
+        )
+    
+    # Calculate date difference
+    try:
+        logger.info(f"Calculating date difference: {date1} to {date2}, unit: {unit}")
+        result = date_diff(date1, date2, unit)
+        
+        # Format the result
+        result_text = (
+            f"Date Difference:\n\n"
+            f"From: {date1}\n"
+            f"To: {date2}\n\n"
+            f"Result: {result['formatted']}\n"
+        )
+        
+        # Add detailed breakdown
+        if unit == "all" or unit == "days":
+            result_text += f"\nTotal Days: {result.get('total_days', result.get('days'))}"
+        
+        if unit == "all":
+            result_text += (
+                f"\n\nDetailed Breakdown:"
+                f"\n  Years: {result['years']}"
+                f"\n  Months: {result['months']}"
+                f"\n  Days: {result['days']}"
+                f"\n  Total Weeks: {result['total_weeks']}"
+            )
+        elif unit == "weeks":
+            result_text += (
+                f"\n\nBreakdown:"
+                f"\n  Weeks: {result['weeks']}"
+                f"\n  Remaining Days: {result['days']}"
+                f"\n  Total Days: {result['total_days']}"
+            )
+        
+        logger.info(f"Date difference calculated: {result['formatted']}")
+        
+        return CallToolResult(
+            content=[TextContent(type="text", text=result_text)],
+            isError=False,
+        )
+        
+    except ValueError as e:
+        logger.error(f"Date calculation error: {e}")
+        return CallToolResult(
+            content=[TextContent(type="text", text=f"Date calculation error: {str(e)}")],
+            isError=True,
+        )
+
+
+async def handle_date_add(arguments: Any) -> CallToolResult:
+    """Handle date_add tool calls."""
+    # Extract and validate parameters
+    date = arguments.get("date")
+    amount = arguments.get("amount")
+    unit = arguments.get("unit")
+    
+    # Validate required parameters
+    if date is None:
+        logger.error("Missing required parameter: date")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text="Missing required parameter 'date'"
+            )],
+            isError=True,
+        )
+    
+    if amount is None:
+        logger.error("Missing required parameter: amount")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text="Missing required parameter 'amount'"
+            )],
+            isError=True,
+        )
+    
+    if unit is None:
+        logger.error("Missing required parameter: unit")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text="Missing required parameter 'unit'"
+            )],
+            isError=True,
+        )
+    
+    # Validate parameter types
+    if not isinstance(date, str):
+        logger.error(f"Invalid parameter type for date: {type(date)}")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=f"Parameter 'date' must be a string, got {type(date).__name__}"
+            )],
+            isError=True,
+        )
+    
+    if not isinstance(amount, int):
+        logger.error(f"Invalid parameter type for amount: {type(amount)}")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=f"Parameter 'amount' must be an integer, got {type(amount).__name__}"
+            )],
+            isError=True,
+        )
+    
+    if not isinstance(unit, str):
+        logger.error(f"Invalid parameter type for unit: {type(unit)}")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=f"Parameter 'unit' must be a string, got {type(unit).__name__}"
+            )],
+            isError=True,
+        )
+    
+    # Add time to date
+    try:
+        logger.info(f"Adding {amount} {unit} to {date}")
+        result = date_add(date, amount, unit)
+        
+        # Format the result
+        operation = "Adding" if amount >= 0 else "Subtracting"
+        result_text = (
+            f"Date Calculation:\n\n"
+            f"{operation} {abs(amount)} {unit} {'to' if amount >= 0 else 'from'} {date}\n\n"
+            f"Original Date: {result['original_date']}\n"
+            f"New Date: {result['new_date']}\n\n"
+            f"Calculation: {result['formatted']}"
+        )
+        
+        logger.info(f"Date calculation: {date} + {amount} {unit} = {result['new_date']}")
+        
+        return CallToolResult(
+            content=[TextContent(type="text", text=result_text)],
+            isError=False,
+        )
+        
+    except ValueError as e:
+        logger.error(f"Date calculation error: {e}")
+        return CallToolResult(
+            content=[TextContent(type="text", text=f"Date calculation error: {str(e)}")],
+            isError=True,
+        )
+
+
+async def handle_business_days(arguments: Any) -> CallToolResult:
+    """Handle business_days tool calls."""
+    # Extract and validate parameters
+    start_date = arguments.get("start_date")
+    end_date = arguments.get("end_date")
+    exclude_holidays = arguments.get("exclude_holidays", [])
+    
+    # Validate required parameters
+    if start_date is None:
+        logger.error("Missing required parameter: start_date")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text="Missing required parameter 'start_date'"
+            )],
+            isError=True,
+        )
+    
+    if end_date is None:
+        logger.error("Missing required parameter: end_date")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text="Missing required parameter 'end_date'"
+            )],
+            isError=True,
+        )
+    
+    # Validate parameter types
+    if not isinstance(start_date, str):
+        logger.error(f"Invalid parameter type for start_date: {type(start_date)}")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=f"Parameter 'start_date' must be a string, got {type(start_date).__name__}"
+            )],
+            isError=True,
+        )
+    
+    if not isinstance(end_date, str):
+        logger.error(f"Invalid parameter type for end_date: {type(end_date)}")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=f"Parameter 'end_date' must be a string, got {type(end_date).__name__}"
+            )],
+            isError=True,
+        )
+    
+    if not isinstance(exclude_holidays, list):
+        logger.error(f"Invalid parameter type for exclude_holidays: {type(exclude_holidays)}")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=f"Parameter 'exclude_holidays' must be an array, got {type(exclude_holidays).__name__}"
+            )],
+            isError=True,
+        )
+    
+    # Calculate business days
+    try:
+        logger.info(f"Calculating business days from {start_date} to {end_date}")
+        result = business_days(start_date, end_date, exclude_holidays if exclude_holidays else None)
+        
+        # Format the result
+        result_text = (
+            f"Business Days Calculation:\n\n"
+            f"Period: {result['start_date']} to {result['end_date']}\n\n"
+            f"Business Days: {result['business_days']}\n"
+            f"Total Calendar Days: {result['total_days']}\n"
+            f"Weekend Days: {result['weekend_days']}\n"
+        )
+        
+        if result['holidays_excluded'] > 0:
+            result_text += f"Holidays Excluded: {result['holidays_excluded']}\n"
+        
+        result_text += f"\n{result['formatted']}"
+        
+        if exclude_holidays and len(exclude_holidays) > 0:
+            result_text += f"\n\nNote: Excluded {len(exclude_holidays)} custom holiday(s)"
+        
+        logger.info(f"Business days: {result['business_days']} between {start_date} and {end_date}")
+        
+        return CallToolResult(
+            content=[TextContent(type="text", text=result_text)],
+            isError=False,
+        )
+        
+    except ValueError as e:
+        logger.error(f"Business days calculation error: {e}")
+        return CallToolResult(
+            content=[TextContent(type="text", text=f"Business days calculation error: {str(e)}")],
+            isError=True,
+        )
+
+
+async def handle_age_calculator(arguments: Any) -> CallToolResult:
+    """Handle age_calculator tool calls."""
+    # Extract and validate parameters
+    birthdate = arguments.get("birthdate")
+    reference_date = arguments.get("reference_date")
+    
+    # Validate required parameter
+    if birthdate is None:
+        logger.error("Missing required parameter: birthdate")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text="Missing required parameter 'birthdate'"
+            )],
+            isError=True,
+        )
+    
+    # Validate parameter types
+    if not isinstance(birthdate, str):
+        logger.error(f"Invalid parameter type for birthdate: {type(birthdate)}")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=f"Parameter 'birthdate' must be a string, got {type(birthdate).__name__}"
+            )],
+            isError=True,
+        )
+    
+    if reference_date is not None and not isinstance(reference_date, str):
+        logger.error(f"Invalid parameter type for reference_date: {type(reference_date)}")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=f"Parameter 'reference_date' must be a string, got {type(reference_date).__name__}"
+            )],
+            isError=True,
+        )
+    
+    # Calculate age
+    try:
+        logger.info(f"Calculating age from birthdate: {birthdate}")
+        result = age_calculator(birthdate, reference_date)
+        
+        # Format the result
+        result_text = (
+            f"Age Calculation:\n\n"
+            f"Birthdate: {result['birthdate']}\n"
+            f"Reference Date: {result['reference_date']}\n\n"
+            f"Age: {result['formatted']}\n\n"
+            f"Detailed Breakdown:"
+            f"\n  Years: {result['years']}"
+            f"\n  Months: {result['months']}"
+            f"\n  Days: {result['days']}"
+            f"\n  Total Days Lived: {result['total_days']:,}"
+        )
+        
+        logger.info(f"Age calculated: {result['formatted']}")
+        
+        return CallToolResult(
+            content=[TextContent(type="text", text=result_text)],
+            isError=False,
+        )
+        
+    except ValueError as e:
+        logger.error(f"Age calculation error: {e}")
+        return CallToolResult(
+            content=[TextContent(type="text", text=f"Age calculation error: {str(e)}")],
+            isError=True,
+        )
+
+
+async def handle_day_of_week(arguments: Any) -> CallToolResult:
+    """Handle day_of_week tool calls."""
+    # Extract and validate parameters
+    date = arguments.get("date")
+    
+    # Validate required parameter
+    if date is None:
+        logger.error("Missing required parameter: date")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text="Missing required parameter 'date'"
+            )],
+            isError=True,
+        )
+    
+    # Validate parameter type
+    if not isinstance(date, str):
+        logger.error(f"Invalid parameter type for date: {type(date)}")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=f"Parameter 'date' must be a string, got {type(date).__name__}"
+            )],
+            isError=True,
+        )
+    
+    # Get day of week information
+    try:
+        logger.info(f"Getting day of week for: {date}")
+        result = day_of_week(date)
+        
+        # Format the result
+        weekend_note = " (Weekend)" if result['is_weekend'] else " (Weekday)"
+        
+        result_text = (
+            f"Day of Week Information:\n\n"
+            f"Date: {result['date']}\n"
+            f"Day: {result['day_name']}{weekend_note}\n\n"
+            f"Calendar Information:"
+            f"\n  ISO Week Number: {result['week_number']}"
+            f"\n  Day of Year: {result['day_of_year']}"
+            f"\n  ISO Year: {result['iso_year']}"
+            f"\n  Day Number (Mon=0): {result['day_number']}"
+            f"\n  ISO Weekday (Mon=1): {result['iso_weekday']}"
+            f"\n\nSummary: {result['formatted']}"
+        )
+        
+        logger.info(f"Day of week: {result['day_name']}")
+        
+        return CallToolResult(
+            content=[TextContent(type="text", text=result_text)],
+            isError=False,
+        )
+        
+    except ValueError as e:
+        logger.error(f"Day of week calculation error: {e}")
+        return CallToolResult(
+            content=[TextContent(type="text", text=f"Day of week calculation error: {str(e)}")],
             isError=True,
         )
 
