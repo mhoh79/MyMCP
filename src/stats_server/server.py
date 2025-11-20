@@ -1361,8 +1361,8 @@ def linear_regression(x: Any, y: list[float], confidence_level: float = 0.95, in
     if not isinstance(confidence_level, (int, float)):
         raise ValueError(f"confidence_level must be numeric, got {type(confidence_level).__name__}")
     
-    if confidence_level < 0.5 or confidence_level > 0.999:
-        raise ValueError(f"confidence_level must be between 0.5 and 0.999, got {confidence_level}")
+    if confidence_level < 0.8 or confidence_level > 0.999:
+        raise ValueError(f"confidence_level must be between 0.8 and 0.999, got {confidence_level}")
     
     # Determine if simple or multiple regression
     is_multiple = isinstance(x, list) and len(x) > 0 and isinstance(x[0], list)
@@ -1500,7 +1500,8 @@ def linear_regression(x: Any, y: list[float], confidence_level: float = 0.95, in
             "f_statistic": f_statistic,
             "p_value": p_value,
             "n_observations": n,
-            "n_parameters": n_params
+            "n_parameters": n_params,
+            "degrees_of_freedom": n - n_params
         }
     }
     
@@ -1764,7 +1765,12 @@ def polynomial_regression(x: list[float], y: list[float], degree: int = 2, auto_
         "optimal_x": optimal_x,
         "optimal_y": optimal_y,
         "interpretation": interpretation,
-        "goodness_of_fit": f"{gof} (R² = {r_squared:.3f})"
+        "goodness_of_fit": f"{gof} (R² = {r_squared:.3f})",
+        "statistics": {
+            "n_observations": n,
+            "n_parameters": n_params,
+            "degrees_of_freedom": n - n_params
+        }
     }
 
 
@@ -2009,6 +2015,12 @@ def prediction_with_intervals(model: dict, x_new: list[float], confidence_level:
     rmse = model["rmse"]
     degree = model.get("degree", None)
     
+    # Get sample size information for proper interval calculations
+    stats = model.get("statistics", {})
+    n_obs = stats.get("n_observations", 30)  # Default to 30 if not available
+    n_params = stats.get("n_parameters", 2)  # Default to 2 if not available
+    df = stats.get("degrees_of_freedom", n_obs - n_params)  # Calculate if not available
+    
     # Determine model type
     if isinstance(coeffs, dict):
         # Linear regression format
@@ -2040,20 +2052,22 @@ def prediction_with_intervals(model: dict, x_new: list[float], confidence_level:
                 pred_y = intercept + sum(slopes[i] * xi[i] for i in range(len(slopes)))
         
         # Confidence interval (for mean response)
-        # Simplified: CI ≈ ŷ ± t * rmse / sqrt(n)
-        # Using approximate t-value
-        if SCIPY_AVAILABLE:
-            t_value = float(scipy_stats.t.ppf((1 + confidence_level) / 2, 30))  # Approximate with df=30
+        # CI ≈ ŷ ± t * rmse / sqrt(n)
+        # Using proper t-value with actual degrees of freedom
+        if SCIPY_AVAILABLE and df > 0:
+            t_value = float(scipy_stats.t.ppf((1 + confidence_level) / 2, df))
         else:
-            t_value = 2.0  # Rough approximation
+            t_value = 2.0  # Rough approximation if scipy not available
         
-        ci_margin = t_value * rmse / math.sqrt(10)  # Assuming n≈10
+        # Use actual sample size
+        ci_margin = t_value * rmse / math.sqrt(n_obs) if n_obs > 0 else t_value * rmse
         ci_lower = pred_y - ci_margin
         ci_upper = pred_y + ci_margin
         
         # Prediction interval (for individual observation)
         # PI ≈ ŷ ± t * rmse * sqrt(1 + 1/n)
-        pi_margin = t_value * rmse * math.sqrt(1 + 0.1)  # Assuming n≈10
+        # This accounts for both model uncertainty and individual variation
+        pi_margin = t_value * rmse * math.sqrt(1 + 1/n_obs) if n_obs > 0 else t_value * rmse * math.sqrt(2)
         pi_lower = pred_y - pi_margin
         pi_upper = pred_y + pi_margin
         
@@ -2192,31 +2206,54 @@ def multivariate_regression(X: list[list[float]], y: list[float], variable_names
     
     # Variable importance (based on absolute standardized coefficients)
     variable_importance = []
-    for i, (name, slope) in enumerate(zip(variable_names, slopes)):
-        # Simplified p-value estimation
-        if SCIPY_AVAILABLE:
-            p_value = 0.001 if abs(slope) > 0.5 else (0.01 if abs(slope) > 0.3 else 0.1)
-        else:
-            p_value = None
+    
+    # Calculate standard errors for p-values if possible
+    if SCIPY_AVAILABLE and result["statistics"].get("degrees_of_freedom", 0) > 0:
+        # Get standard errors from the linear regression result
+        # Note: This is approximate since we don't have the full covariance matrix
+        # For a more accurate implementation, we would need to compute the full (X'X)^-1 matrix
+        df = result["statistics"]["degrees_of_freedom"]
+        rmse_model = result["statistics"]["rmse"]
         
-        if p_value is not None:
-            if p_value < 0.001:
-                significance = "***"
-            elif p_value < 0.01:
-                significance = "**"
-            elif p_value < 0.05:
-                significance = "*"
+        for i, (name, slope) in enumerate(zip(variable_names, slopes)):
+            # Approximate standard error (this is simplified)
+            # In practice, we'd need sqrt(MSE * (X'X)^-1[i,i])
+            se_approx = rmse_model / math.sqrt(n)  # Very rough approximation
+            
+            if se_approx > 1e-10:
+                t_stat = slope / se_approx
+                # Calculate two-tailed p-value
+                p_value = float(2 * (1 - scipy_stats.t.cdf(abs(t_stat), df)))
+            else:
+                p_value = None
+            
+            if p_value is not None:
+                if p_value < 0.001:
+                    significance = "***"
+                elif p_value < 0.01:
+                    significance = "**"
+                elif p_value < 0.05:
+                    significance = "*"
+                else:
+                    significance = ""
             else:
                 significance = ""
-        else:
-            significance = ""
-        
-        variable_importance.append({
-            "variable": name,
-            "coefficient": slope,
-            "p_value": p_value,
-            "significance": significance
-        })
+            
+            variable_importance.append({
+                "variable": name,
+                "coefficient": slope,
+                "p_value": p_value,
+                "significance": significance
+            })
+    else:
+        # If scipy not available or insufficient data, just use coefficients
+        for i, (name, slope) in enumerate(zip(variable_names, slopes)):
+            variable_importance.append({
+                "variable": name,
+                "coefficient": slope,
+                "p_value": None,
+                "significance": ""
+            })
     
     # Sort by absolute coefficient value
     variable_importance.sort(key=lambda v: abs(v["coefficient"]), reverse=True)
@@ -2259,7 +2296,7 @@ def multivariate_regression(X: list[list[float]], y: list[float], variable_names
     most_important = variable_importance[0]["variable"]
     interpretation = f"{most_important} has strongest effect."
     
-    significant_vars = [v["variable"] for v in variable_importance if v.get("p_value", 1) < 0.05]
+    significant_vars = [v["variable"] for v in variable_importance if v.get("p_value") is not None and v["p_value"] < 0.05]
     if len(significant_vars) == len(variable_names):
         interpretation += " All variables are significant."
     elif len(significant_vars) > 0:
@@ -2645,8 +2682,8 @@ async def list_tools() -> list[Tool]:
                     },
                     "confidence_level": {
                         "type": "number",
-                        "description": "Confidence level for intervals (0.5-0.999)",
-                        "minimum": 0.5,
+                        "description": "Confidence level for intervals (0.8-0.999)",
+                        "minimum": 0.8,
                         "maximum": 0.999,
                         "default": 0.95
                     },
