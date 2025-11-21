@@ -37,6 +37,12 @@ Dedicated statistical analysis tools:
   - **Peak Detection**: Identify dominant frequencies, harmonics, and resonances
   - **Signal-to-Noise Ratio**: Assess sensor health and data acquisition quality
   - **Harmonic Analysis**: THD calculation, power quality, and IEEE 519 compliance
+- **Statistical Process Control (SPC)**: 5 essential tools for manufacturing quality control and Six Sigma
+  - **Control Limits**: Calculate UCL, LCL, centerline for X-bar, Individuals, Range, S, p, np, c, u charts
+  - **Process Capability**: Cp, Cpk, Pp, Ppk indices with sigma level and estimated PPM defects
+  - **Western Electric Rules**: 8 run rules for early detection of non-random patterns
+  - **CUSUM Chart**: Cumulative sum for detecting small persistent shifts (<1.5σ)
+  - **EWMA Chart**: Exponentially weighted moving average for balanced shift detection
 
 ## 🌟 Benefits of Split Architecture
 
@@ -218,6 +224,24 @@ Once configured, you can interact with the server through Claude:
 ```
 
 **For detailed signal processing documentation and industrial workflows, see [SIGNAL_PROCESSING_TOOLS.md](SIGNAL_PROCESSING_TOOLS.md)**
+### Statistical Process Control (SPC) Tools (Stats Server)
+```
+"Calculate control limits for these process measurements using an individuals chart"
+"Determine if this process is capable of meeting specifications from 490 to 510"
+"Apply Western Electric rules to detect non-random patterns in my control chart data"
+"Use CUSUM to detect small shifts in compressor efficiency over 90 days"
+"Apply EWMA chart with lambda=0.2 to smooth noisy pH measurements"
+"Calculate Cp and Cpk indices for this manufacturing process"
+"Check if there are any out-of-control points in my X-bar chart data"
+```
+
+**SPC Use Cases:**
+- Manufacturing quality control and Six Sigma programs
+- Process monitoring and stability assessment
+- Supplier qualification and process validation
+- Regulatory compliance (ISO 9001, FDA)
+- Early detection of process shifts and trends
+- Capability analysis and continuous improvement
 
 ### Unit Converter
 ```
