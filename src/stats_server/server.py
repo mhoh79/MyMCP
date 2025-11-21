@@ -1,12 +1,15 @@
 """
 Main MCP server implementation for statistical analysis.
 This server exposes tools for descriptive statistics, correlation analysis, 
-percentile calculations, and outlier detection.
+percentile calculations, outlier detection, time series analysis, and signal processing.
 """
 
 import asyncio
 import logging
 from typing import Any
+import numpy as np
+from scipy import signal as scipy_signal
+from scipy.fft import fft, fftfreq
 from scipy import stats as scipy_stats
 
 # MCP SDK imports for building the server
@@ -1314,6 +1317,829 @@ def rolling_statistics(data: list[float], window_size: int, statistics: list[str
 
 
 # ============================================================================
+# Signal Processing Functions
+# ============================================================================
+
+
+def fft_analysis(signal_data: list[float], sample_rate: float, window: str = "hanning", detrend: bool = True) -> dict[str, Any]:
+    """
+    Perform Fast Fourier Transform (FFT) analysis for frequency domain analysis.
+    
+    Used for bearing defect detection, motor electrical faults, gearbox analysis,
+    pump cavitation detection, and vibration analysis.
+    
+    Args:
+        signal_data: Time-domain signal (vibration, current, acoustic, etc.), min 8 items
+        sample_rate: Sampling frequency in Hz (1-1000000)
+        window: Windowing function - "hanning", "hamming", "blackman", "rectangular" (default: "hanning")
+        detrend: Remove DC component and linear trends (default: True)
+        
+    Returns:
+        Dictionary containing:
+        - 'sample_rate': Input sample rate
+        - 'signal_length': Number of samples
+        - 'duration_seconds': Signal duration
+        - 'frequencies': Frequency array up to Nyquist
+        - 'magnitudes': Magnitude spectrum
+        - 'dominant_frequencies': Top frequency peaks with magnitudes
+        - 'nyquist_frequency': Maximum frequency (sample_rate/2)
+        - 'resolution': Frequency resolution (Hz per bin)
+        - 'interpretation': Analysis interpretation
+        
+    Raises:
+        ValueError: If validation fails
+        
+    Examples:
+        fft_analysis([...], 10000, "hanning", True)
+        >>> Dominant frequencies at 60 Hz, 120 Hz (electrical harmonics)
+    """
+    # Validate input
+    if not isinstance(signal_data, list):
+        raise ValueError(f"signal_data must be a list, got {type(signal_data).__name__}")
+    
+    if len(signal_data) < 8:
+        raise ValueError("signal_data must contain at least 8 items")
+    
+    # Validate all elements are numeric
+    for i, value in enumerate(signal_data):
+        if not isinstance(value, (int, float)):
+            raise ValueError(f"All signal values must be numeric. Item at index {i} is {type(value).__name__}: {value}")
+    
+    # Validate sample_rate
+    if not isinstance(sample_rate, (int, float)):
+        raise ValueError(f"sample_rate must be numeric, got {type(sample_rate).__name__}")
+    
+    if sample_rate < 1 or sample_rate > 1000000:
+        raise ValueError(f"sample_rate must be between 1 and 1000000 Hz, got {sample_rate}")
+    
+    # Validate window type
+    valid_windows = ["hanning", "hamming", "blackman", "rectangular"]
+    if window not in valid_windows:
+        raise ValueError(f"window must be one of {valid_windows}, got '{window}'")
+    
+    # Convert to numpy array
+    signal_array = np.array(signal_data, dtype=float)
+    n = len(signal_array)
+    
+    # Detrend if requested (remove DC and linear trend)
+    if detrend:
+        signal_array = scipy_signal.detrend(signal_array)
+    
+    # Apply window function to reduce spectral leakage
+    if window == "hanning":
+        window_func = scipy_signal.windows.hann(n)
+    elif window == "hamming":
+        window_func = scipy_signal.windows.hamming(n)
+    elif window == "blackman":
+        window_func = scipy_signal.windows.blackman(n)
+    else:  # rectangular
+        window_func = np.ones(n)
+    
+    windowed_signal = signal_array * window_func
+    
+    # Perform FFT
+    fft_result = fft(windowed_signal)
+    
+    # Get frequency bins (only positive frequencies up to Nyquist)
+    freqs = fftfreq(n, 1.0 / sample_rate)
+    
+    # Take only positive frequencies (up to Nyquist frequency)
+    nyquist_idx = n // 2
+    freqs_positive = freqs[:nyquist_idx]
+    
+    # Calculate magnitude spectrum (scaled properly)
+    magnitudes = np.abs(fft_result[:nyquist_idx]) * 2.0 / n
+    
+    # Nyquist frequency and resolution
+    nyquist_freq = sample_rate / 2.0
+    freq_resolution = sample_rate / n
+    duration_seconds = n / sample_rate
+    
+    # Find dominant frequencies (top 10 peaks)
+    # Use peak detection to find local maxima
+    peaks, properties = scipy_signal.find_peaks(magnitudes, height=0, prominence=np.max(magnitudes) * 0.05)
+    
+    # Sort peaks by magnitude (descending)
+    if len(peaks) > 0:
+        peak_mags = magnitudes[peaks]
+        sorted_indices = np.argsort(peak_mags)[::-1]
+        top_peaks = peaks[sorted_indices[:10]]
+        top_mags = peak_mags[sorted_indices[:10]]
+        
+        dominant_frequencies = []
+        for peak_idx, mag in zip(top_peaks, top_mags):
+            freq = freqs_positive[peak_idx]
+            # Provide interpretation hints for common frequencies
+            interpretation = ""
+            if 59 <= freq <= 61:
+                interpretation = "Electrical line frequency (60 Hz)"
+            elif 119 <= freq <= 121:
+                interpretation = "Second harmonic (120 Hz)"
+            elif 179 <= freq <= 181:
+                interpretation = "Third harmonic (180 Hz)"
+            elif freq > 1000:
+                interpretation = "High frequency component (possible bearing defect)"
+            
+            dominant_frequencies.append({
+                'frequency': float(freq),
+                'magnitude': float(mag),
+                'interpretation': interpretation
+            })
+    else:
+        dominant_frequencies = []
+    
+    # Generate interpretation
+    interpretation = ""
+    if len(dominant_frequencies) > 0:
+        top_freq = dominant_frequencies[0]['frequency']
+        if 59 <= top_freq <= 61:
+            interpretation = "Strong electrical line frequency component detected. Check for electromagnetic interference."
+        elif top_freq > 1000:
+            interpretation = "High frequency energy detected. May indicate bearing defects or gear mesh issues."
+        else:
+            interpretation = f"Dominant frequency at {top_freq:.1f} Hz."
+    else:
+        interpretation = "No significant frequency peaks detected. Signal may be primarily noise."
+    
+    return {
+        'sample_rate': float(sample_rate),
+        'signal_length': n,
+        'duration_seconds': float(duration_seconds),
+        'frequencies': freqs_positive.tolist(),
+        'magnitudes': magnitudes.tolist(),
+        'dominant_frequencies': dominant_frequencies,
+        'nyquist_frequency': float(nyquist_freq),
+        'resolution': float(freq_resolution),
+        'interpretation': interpretation
+    }
+
+
+def power_spectral_density(signal_data: list[float], sample_rate: float, method: str = "welch", nperseg: int = 256) -> dict[str, Any]:
+    """
+    Calculate Power Spectral Density (PSD) for energy distribution across frequencies.
+    
+    Used for vibration energy distribution, noise level assessment, and random vibration analysis.
+    
+    Args:
+        signal_data: Time-domain signal, min 16 items
+        sample_rate: Sampling frequency in Hz
+        method: PSD estimation method - "welch" or "periodogram" (default: "welch")
+        nperseg: Length of each segment for Welch method (default: 256)
+        
+    Returns:
+        Dictionary containing:
+        - 'method': Method used
+        - 'frequencies': Frequency array
+        - 'psd': Power spectral density values
+        - 'total_power': Total power in signal
+        - 'peak_frequency': Frequency with maximum power
+        - 'peak_power': Maximum power value
+        - 'interpretation': Analysis interpretation
+        
+    Raises:
+        ValueError: If validation fails
+    """
+    # Validate input
+    if not isinstance(signal_data, list):
+        raise ValueError(f"signal_data must be a list, got {type(signal_data).__name__}")
+    
+    if len(signal_data) < 16:
+        raise ValueError("signal_data must contain at least 16 items")
+    
+    # Validate all elements are numeric
+    for i, value in enumerate(signal_data):
+        if not isinstance(value, (int, float)):
+            raise ValueError(f"All signal values must be numeric. Item at index {i} is {type(value).__name__}: {value}")
+    
+    # Validate sample_rate
+    if not isinstance(sample_rate, (int, float)):
+        raise ValueError(f"sample_rate must be numeric, got {type(sample_rate).__name__}")
+    
+    if sample_rate <= 0:
+        raise ValueError(f"sample_rate must be positive, got {sample_rate}")
+    
+    # Validate method
+    if method not in ["welch", "periodogram"]:
+        raise ValueError(f"method must be 'welch' or 'periodogram', got '{method}'")
+    
+    # Validate nperseg
+    if not isinstance(nperseg, int):
+        raise ValueError(f"nperseg must be an integer, got {type(nperseg).__name__}")
+    
+    if nperseg < 2:
+        raise ValueError(f"nperseg must be at least 2, got {nperseg}")
+    
+    # Convert to numpy array
+    signal_array = np.array(signal_data, dtype=float)
+    
+    # Calculate PSD
+    if method == "welch":
+        # Welch's method: overlapping segments with averaging (more accurate for noisy signals)
+        freqs, psd = scipy_signal.welch(signal_array, fs=sample_rate, nperseg=min(nperseg, len(signal_array)))
+    else:  # periodogram
+        # Periodogram: direct FFT method
+        freqs, psd = scipy_signal.periodogram(signal_array, fs=sample_rate)
+    
+    # Calculate statistics
+    total_power = float(np.trapz(psd, freqs))  # Integrate PSD to get total power
+    peak_idx = np.argmax(psd)
+    peak_frequency = float(freqs[peak_idx])
+    peak_power = float(psd[peak_idx])
+    
+    # Generate interpretation
+    interpretation = f"Peak power at {peak_frequency:.1f} Hz. "
+    if peak_frequency < 100:
+        interpretation += "Low frequency energy dominant - typical of structural vibration or slow processes."
+    elif peak_frequency < 1000:
+        interpretation += "Medium frequency energy - typical of rotating machinery."
+    else:
+        interpretation += "High frequency energy - may indicate bearing wear or gear mesh issues."
+    
+    return {
+        'method': method.title(),
+        'frequencies': freqs.tolist(),
+        'psd': psd.tolist(),
+        'total_power': total_power,
+        'peak_frequency': peak_frequency,
+        'peak_power': peak_power,
+        'interpretation': interpretation
+    }
+
+
+def rms_value(signal_data: list[float], window_size: int = None, reference_value: float = None) -> dict[str, Any]:
+    """
+    Calculate Root Mean Square (RMS) for overall signal energy.
+    
+    Used for overall vibration severity (ISO 10816), electrical current RMS, and acoustic noise level.
+    
+    Args:
+        signal_data: Time-domain signal, min 2 items
+        window_size: Calculate rolling RMS (optional), min 2
+        reference_value: Reference for dB calculation (e.g., 20 µPa for acoustic)
+        
+    Returns:
+        Dictionary containing:
+        - 'rms': Overall RMS value
+        - 'peak': Peak value
+        - 'crest_factor': Peak/RMS ratio
+        - 'rms_db': RMS in decibels (if reference provided)
+        - 'rolling_rms': Rolling RMS values (if window_size provided)
+        - 'interpretation': Analysis interpretation
+        
+    Raises:
+        ValueError: If validation fails
+    """
+    # Validate input
+    if not isinstance(signal_data, list):
+        raise ValueError(f"signal_data must be a list, got {type(signal_data).__name__}")
+    
+    if len(signal_data) < 2:
+        raise ValueError("signal_data must contain at least 2 items")
+    
+    # Validate all elements are numeric
+    for i, value in enumerate(signal_data):
+        if not isinstance(value, (int, float)):
+            raise ValueError(f"All signal values must be numeric. Item at index {i} is {type(value).__name__}: {value}")
+    
+    # Validate window_size if provided
+    if window_size is not None:
+        if not isinstance(window_size, int):
+            raise ValueError(f"window_size must be an integer, got {type(window_size).__name__}")
+        if window_size < 2:
+            raise ValueError(f"window_size must be at least 2, got {window_size}")
+        if window_size > len(signal_data):
+            raise ValueError(f"window_size ({window_size}) cannot be larger than signal length ({len(signal_data)})")
+    
+    # Validate reference_value if provided
+    if reference_value is not None:
+        if not isinstance(reference_value, (int, float)):
+            raise ValueError(f"reference_value must be numeric, got {type(reference_value).__name__}")
+        if reference_value <= 0:
+            raise ValueError(f"reference_value must be positive, got {reference_value}")
+    
+    # Convert to numpy array
+    signal_array = np.array(signal_data, dtype=float)
+    
+    # Calculate overall RMS
+    rms = float(np.sqrt(np.mean(signal_array ** 2)))
+    
+    # Calculate peak value
+    peak = float(np.max(np.abs(signal_array)))
+    
+    # Calculate crest factor (peak/RMS)
+    crest_factor = float(peak / rms) if rms > 0 else 0.0
+    
+    # Calculate RMS in dB if reference provided
+    rms_db = None
+    if reference_value is not None and rms > 0:
+        rms_db = float(20 * np.log10(rms / reference_value))
+    
+    # Calculate rolling RMS if window_size provided
+    rolling_rms_values = None
+    if window_size is not None:
+        rolling_rms_list = []
+        for i in range(len(signal_array) - window_size + 1):
+            window = signal_array[i:i + window_size]
+            window_rms = np.sqrt(np.mean(window ** 2))
+            rolling_rms_list.append(float(window_rms))
+        rolling_rms_values = rolling_rms_list
+    
+    # Generate interpretation
+    interpretation = ""
+    if crest_factor > 5:
+        interpretation = "High crest factor indicates impulsive signals - check for impacts or bearing defects."
+    elif crest_factor > 3:
+        interpretation = "Moderate crest factor - normal for many rotating machinery signals."
+    else:
+        interpretation = "Low crest factor - signal is relatively smooth."
+    
+    # Add trending information if rolling RMS calculated
+    trend = None
+    if rolling_rms_values and len(rolling_rms_values) > 1:
+        # Simple trend detection: compare first and last thirds
+        first_third = np.mean(rolling_rms_values[:len(rolling_rms_values) // 3])
+        last_third = np.mean(rolling_rms_values[-len(rolling_rms_values) // 3:])
+        percent_change = ((last_third - first_third) / first_third * 100) if first_third > 0 else 0
+        
+        if percent_change > 10:
+            trend = "increasing"
+        elif percent_change < -10:
+            trend = "decreasing"
+        else:
+            trend = "stable"
+    
+    result = {
+        'rms': rms,
+        'peak': peak,
+        'crest_factor': crest_factor,
+        'interpretation': interpretation
+    }
+    
+    if rms_db is not None:
+        result['rms_db'] = rms_db
+    
+    if rolling_rms_values is not None:
+        result['rolling_rms'] = rolling_rms_values
+        result['trend'] = trend
+    
+    return result
+
+
+def peak_detection(signal_data: list[float], frequencies: list[float] = None, height: float = 0.1, 
+                   distance: int = 1, prominence: float = 0.05, top_n: int = 10) -> dict[str, Any]:
+    """
+    Identify significant peaks in signals with filtering and ranking.
+    
+    Used for finding dominant vibration frequencies, detecting harmonics, and identifying resonances.
+    
+    Args:
+        signal_data: Signal data (time or frequency domain), min 3 items
+        frequencies: Corresponding frequencies (for frequency domain data), optional
+        height: Minimum peak height (default: 0.1)
+        distance: Minimum samples between peaks (default: 1)
+        prominence: Required prominence above surroundings (default: 0.05)
+        top_n: Return top N peaks only (1-50, default: 10)
+        
+    Returns:
+        Dictionary containing:
+        - 'peaks_found': Total number of peaks detected
+        - 'top_peaks': List of top N peaks with indices, values, and interpretations
+        - 'interpretation': Overall analysis
+        
+    Raises:
+        ValueError: If validation fails
+    """
+    # Validate input
+    if not isinstance(signal_data, list):
+        raise ValueError(f"signal_data must be a list, got {type(signal_data).__name__}")
+    
+    if len(signal_data) < 3:
+        raise ValueError("signal_data must contain at least 3 items")
+    
+    # Validate all elements are numeric
+    for i, value in enumerate(signal_data):
+        if not isinstance(value, (int, float)):
+            raise ValueError(f"All signal values must be numeric. Item at index {i} is {type(value).__name__}: {value}")
+    
+    # Validate frequencies if provided
+    if frequencies is not None:
+        if not isinstance(frequencies, list):
+            raise ValueError(f"frequencies must be a list, got {type(frequencies).__name__}")
+        if len(frequencies) != len(signal_data):
+            raise ValueError(f"frequencies length ({len(frequencies)}) must match signal_data length ({len(signal_data)})")
+        for i, value in enumerate(frequencies):
+            if not isinstance(value, (int, float)):
+                raise ValueError(f"All frequency values must be numeric. Item at index {i} is {type(value).__name__}")
+    
+    # Validate parameters
+    if not isinstance(height, (int, float)):
+        raise ValueError(f"height must be numeric, got {type(height).__name__}")
+    
+    if not isinstance(distance, int):
+        raise ValueError(f"distance must be an integer, got {type(distance).__name__}")
+    if distance < 1:
+        raise ValueError(f"distance must be at least 1, got {distance}")
+    
+    if not isinstance(prominence, (int, float)):
+        raise ValueError(f"prominence must be numeric, got {type(prominence).__name__}")
+    
+    if not isinstance(top_n, int):
+        raise ValueError(f"top_n must be an integer, got {type(top_n).__name__}")
+    if top_n < 1 or top_n > 50:
+        raise ValueError(f"top_n must be between 1 and 50, got {top_n}")
+    
+    # Convert to numpy array
+    signal_array = np.array(signal_data, dtype=float)
+    
+    # Detect peaks using scipy
+    # Calculate relative prominence threshold
+    max_val = np.max(signal_array)
+    abs_prominence = prominence * max_val if max_val > 0 else prominence
+    
+    peaks, properties = scipy_signal.find_peaks(
+        signal_array,
+        height=height,
+        distance=distance,
+        prominence=abs_prominence
+    )
+    
+    peaks_found = len(peaks)
+    
+    # Sort peaks by magnitude (descending) and take top N
+    if peaks_found > 0:
+        peak_magnitudes = signal_array[peaks]
+        sorted_indices = np.argsort(peak_magnitudes)[::-1]
+        top_indices = sorted_indices[:min(top_n, peaks_found)]
+        
+        top_peaks_list = []
+        for rank, idx in enumerate(top_indices, 1):
+            peak_idx = peaks[idx]
+            magnitude = float(signal_array[peak_idx])
+            
+            peak_info = {
+                'index': int(peak_idx),
+                'magnitude': magnitude,
+                'prominence': float(properties['prominences'][idx]),
+                'rank': rank
+            }
+            
+            # Add frequency if provided
+            if frequencies is not None:
+                frequency = float(frequencies[peak_idx])
+                peak_info['frequency'] = frequency
+                
+                # Add interpretation for frequency domain
+                interpretation = ""
+                if 59 <= frequency <= 61:
+                    interpretation = "Electrical line frequency (60 Hz)"
+                elif 119 <= frequency <= 121:
+                    interpretation = "Second harmonic (120 Hz)"
+                elif 49 <= frequency <= 51:
+                    interpretation = "Electrical line frequency (50 Hz)"
+                elif frequency > 1000:
+                    interpretation = "High frequency - potential bearing defect"
+                
+                peak_info['interpretation'] = interpretation
+            
+            top_peaks_list.append(peak_info)
+    else:
+        top_peaks_list = []
+    
+    # Generate interpretation
+    if peaks_found == 0:
+        interpretation = "No significant peaks detected in the signal."
+    elif peaks_found == 1:
+        interpretation = "Single dominant peak detected."
+    else:
+        interpretation = f"{peaks_found} peaks detected. Top {min(top_n, peaks_found)} peaks returned."
+    
+    return {
+        'peaks_found': peaks_found,
+        'top_peaks': top_peaks_list,
+        'interpretation': interpretation
+    }
+
+
+def signal_to_noise_ratio(signal_data: list[float], noise_data: list[float] = None, method: str = "power") -> dict[str, Any]:
+    """
+    Calculate Signal-to-Noise Ratio (SNR) to assess signal quality.
+    
+    Used for sensor health monitoring, data acquisition quality checks, and instrumentation validation.
+    
+    Args:
+        signal_data: Signal containing signal + noise, min 10 items
+        noise_data: Noise reference (optional - will estimate if not provided)
+        method: SNR calculation method - "power", "amplitude", or "peak" (default: "power")
+        
+    Returns:
+        Dictionary containing:
+        - 'snr_db': SNR in decibels
+        - 'snr_ratio': Linear SNR ratio
+        - 'signal_power': Signal power
+        - 'noise_power': Noise power
+        - 'quality': Quality assessment
+        - 'interpretation': Analysis interpretation
+        
+    Raises:
+        ValueError: If validation fails
+    """
+    # Validate input
+    if not isinstance(signal_data, list):
+        raise ValueError(f"signal_data must be a list, got {type(signal_data).__name__}")
+    
+    if len(signal_data) < 10:
+        raise ValueError("signal_data must contain at least 10 items")
+    
+    # Validate all elements are numeric
+    for i, value in enumerate(signal_data):
+        if not isinstance(value, (int, float)):
+            raise ValueError(f"All signal values must be numeric. Item at index {i} is {type(value).__name__}: {value}")
+    
+    # Validate noise_data if provided
+    if noise_data is not None:
+        if not isinstance(noise_data, list):
+            raise ValueError(f"noise_data must be a list, got {type(noise_data).__name__}")
+        for i, value in enumerate(noise_data):
+            if not isinstance(value, (int, float)):
+                raise ValueError(f"All noise values must be numeric. Item at index {i} is {type(value).__name__}")
+    
+    # Validate method
+    valid_methods = ["power", "amplitude", "peak"]
+    if method not in valid_methods:
+        raise ValueError(f"method must be one of {valid_methods}, got '{method}'")
+    
+    # Convert to numpy array
+    signal_array = np.array(signal_data, dtype=float)
+    
+    # Estimate signal and noise
+    if noise_data is not None:
+        # Noise reference provided
+        noise_array = np.array(noise_data, dtype=float)
+        noise_estimate = noise_array
+        # Assume signal_data contains pure signal
+        signal_estimate = signal_array
+    else:
+        # Estimate noise from signal (assuming signal has both)
+        # Use high-pass filtered signal as noise estimate
+        # This is a simple estimation method
+        mean_val = np.mean(signal_array)
+        signal_estimate = signal_array - mean_val
+        
+        # Estimate noise as high-frequency component
+        # Use difference between adjacent samples as noise estimate
+        noise_estimate = np.diff(signal_array)
+    
+    # Calculate SNR based on method
+    if method == "power":
+        # Power-based SNR
+        signal_power = float(np.mean(signal_estimate ** 2))
+        noise_power = float(np.mean(noise_estimate ** 2))
+        
+        if noise_power > 0:
+            snr_ratio = signal_power / noise_power
+            snr_db = float(10 * np.log10(snr_ratio))
+        else:
+            snr_ratio = float('inf')
+            snr_db = float('inf')
+    
+    elif method == "amplitude":
+        # Amplitude-based SNR (RMS)
+        signal_rms = float(np.sqrt(np.mean(signal_estimate ** 2)))
+        noise_rms = float(np.sqrt(np.mean(noise_estimate ** 2)))
+        
+        if noise_rms > 0:
+            snr_ratio = signal_rms / noise_rms
+            snr_db = float(20 * np.log10(snr_ratio))
+        else:
+            snr_ratio = float('inf')
+            snr_db = float('inf')
+        
+        signal_power = float(signal_rms ** 2)
+        noise_power = float(noise_rms ** 2)
+    
+    else:  # peak
+        # Peak-based SNR
+        signal_peak = float(np.max(np.abs(signal_estimate)))
+        noise_peak = float(np.max(np.abs(noise_estimate)))
+        
+        if noise_peak > 0:
+            snr_ratio = signal_peak / noise_peak
+            snr_db = float(20 * np.log10(snr_ratio))
+        else:
+            snr_ratio = float('inf')
+            snr_db = float('inf')
+        
+        signal_power = float(signal_peak ** 2)
+        noise_power = float(noise_peak ** 2)
+    
+    # Quality assessment
+    if snr_db > 40:
+        quality = "Excellent"
+        interpretation = "Signal quality excellent (SNR > 40 dB). No sensor issues detected."
+    elif snr_db > 30:
+        quality = "Good"
+        interpretation = "Signal quality good (SNR > 30 dB). Suitable for most applications."
+    elif snr_db > 20:
+        quality = "Fair"
+        interpretation = "Signal quality fair (SNR > 20 dB). Consider noise reduction if critical."
+    elif snr_db > 10:
+        quality = "Poor"
+        interpretation = "Signal quality poor (SNR > 10 dB). Check sensor and wiring."
+    else:
+        quality = "Very Poor"
+        interpretation = "Signal quality very poor (SNR < 10 dB). Sensor may be faulty."
+    
+    return {
+        'snr_db': snr_db,
+        'snr_ratio': snr_ratio,
+        'signal_power': signal_power,
+        'noise_power': noise_power,
+        'quality': quality,
+        'interpretation': interpretation
+    }
+
+
+def harmonic_analysis(signal_data: list[float], sample_rate: float, fundamental_freq: float, max_harmonic: int = 50) -> dict[str, Any]:
+    """
+    Detect and analyze harmonic content in electrical and mechanical signals.
+    
+    Used for power quality assessment (THD), motor current signature analysis, and electrical fault detection.
+    
+    Args:
+        signal_data: Periodic signal (voltage, current, vibration), min 64 items
+        sample_rate: Sampling frequency in Hz
+        fundamental_freq: Expected fundamental frequency (e.g., 60 Hz for electrical), min 1 Hz
+        max_harmonic: Maximum harmonic order to analyze (1-100, default: 50)
+        
+    Returns:
+        Dictionary containing:
+        - 'fundamental': Fundamental frequency component (frequency, magnitude, phase)
+        - 'harmonics': List of harmonic components (order, frequency, magnitude, percent)
+        - 'thd': Total Harmonic Distortion percentage
+        - 'thd_interpretation': THD quality assessment
+        - 'dominant_harmonics': List of strongest harmonic orders
+        - 'interpretation': Analysis interpretation
+        
+    Raises:
+        ValueError: If validation fails
+    """
+    # Validate input
+    if not isinstance(signal_data, list):
+        raise ValueError(f"signal_data must be a list, got {type(signal_data).__name__}")
+    
+    if len(signal_data) < 64:
+        raise ValueError("signal_data must contain at least 64 items")
+    
+    # Validate all elements are numeric
+    for i, value in enumerate(signal_data):
+        if not isinstance(value, (int, float)):
+            raise ValueError(f"All signal values must be numeric. Item at index {i} is {type(value).__name__}: {value}")
+    
+    # Validate sample_rate
+    if not isinstance(sample_rate, (int, float)):
+        raise ValueError(f"sample_rate must be numeric, got {type(sample_rate).__name__}")
+    if sample_rate <= 0:
+        raise ValueError(f"sample_rate must be positive, got {sample_rate}")
+    
+    # Validate fundamental_freq
+    if not isinstance(fundamental_freq, (int, float)):
+        raise ValueError(f"fundamental_freq must be numeric, got {type(fundamental_freq).__name__}")
+    if fundamental_freq < 1:
+        raise ValueError(f"fundamental_freq must be at least 1 Hz, got {fundamental_freq}")
+    
+    # Validate max_harmonic
+    if not isinstance(max_harmonic, int):
+        raise ValueError(f"max_harmonic must be an integer, got {type(max_harmonic).__name__}")
+    if max_harmonic < 1 or max_harmonic > 100:
+        raise ValueError(f"max_harmonic must be between 1 and 100, got {max_harmonic}")
+    
+    # Convert to numpy array
+    signal_array = np.array(signal_data, dtype=float)
+    n = len(signal_array)
+    
+    # Perform FFT
+    fft_result = fft(signal_array)
+    freqs = fftfreq(n, 1.0 / sample_rate)
+    
+    # Calculate magnitude spectrum
+    magnitudes = np.abs(fft_result) * 2.0 / n
+    
+    # Find fundamental frequency component
+    freq_resolution = sample_rate / n
+    fund_idx = int(round(fundamental_freq / freq_resolution))
+    
+    # Search in a window around expected fundamental
+    search_window = max(3, int(0.05 * fund_idx))  # 5% window
+    search_start = max(0, fund_idx - search_window)
+    search_end = min(len(freqs) // 2, fund_idx + search_window)
+    
+    # Find peak in search window
+    window_mags = magnitudes[search_start:search_end]
+    if len(window_mags) > 0:
+        local_peak = np.argmax(window_mags)
+        fund_idx = search_start + local_peak
+    
+    fundamental_magnitude = float(magnitudes[fund_idx])
+    fundamental_frequency = float(freqs[fund_idx])
+    
+    # Extract harmonics
+    harmonics_list = []
+    harmonic_sum_squared = 0.0
+    
+    for h in range(2, max_harmonic + 1):
+        harmonic_freq = fundamental_frequency * h
+        
+        # Check if harmonic is within Nyquist frequency
+        if harmonic_freq >= sample_rate / 2:
+            break
+        
+        # Find harmonic component
+        harm_idx = int(round(harmonic_freq / freq_resolution))
+        
+        # Search in window
+        search_window_h = max(2, int(0.05 * harm_idx))
+        search_start_h = max(0, harm_idx - search_window_h)
+        search_end_h = min(len(freqs) // 2, harm_idx + search_window_h)
+        
+        if search_start_h < search_end_h:
+            window_mags_h = magnitudes[search_start_h:search_end_h]
+            if len(window_mags_h) > 0:
+                local_peak_h = np.argmax(window_mags_h)
+                harm_idx = search_start_h + local_peak_h
+                
+                harmonic_magnitude = float(magnitudes[harm_idx])
+                harmonic_frequency = float(freqs[harm_idx])
+                
+                # Calculate percentage of fundamental
+                if fundamental_magnitude > 0:
+                    percent = (harmonic_magnitude / fundamental_magnitude) * 100
+                else:
+                    percent = 0.0
+                
+                harmonics_list.append({
+                    'order': h,
+                    'frequency': harmonic_frequency,
+                    'magnitude': harmonic_magnitude,
+                    'percent': float(percent)
+                })
+                
+                harmonic_sum_squared += harmonic_magnitude ** 2
+    
+    # Calculate THD (Total Harmonic Distortion)
+    if fundamental_magnitude > 0:
+        thd = float((np.sqrt(harmonic_sum_squared) / fundamental_magnitude) * 100)
+    else:
+        thd = 0.0
+    
+    # THD interpretation
+    if thd < 5:
+        thd_interpretation = "Excellent - Very low distortion (THD < 5%)"
+    elif thd < 8:
+        thd_interpretation = "Good - Low distortion (5% ≤ THD < 8%)"
+    elif thd < 15:
+        thd_interpretation = "Moderate - Acceptable distortion (8% ≤ THD < 15%)"
+    elif thd < 25:
+        thd_interpretation = "Poor - High distortion (15% ≤ THD < 25%)"
+    else:
+        thd_interpretation = "Very Poor - Excessive distortion (THD ≥ 25%)"
+    
+    # Find dominant harmonics (top 5 by magnitude)
+    if harmonics_list:
+        sorted_harmonics = sorted(harmonics_list, key=lambda x: x['magnitude'], reverse=True)
+        dominant_harmonics = [h['order'] for h in sorted_harmonics[:5]]
+    else:
+        dominant_harmonics = []
+    
+    # Generate interpretation
+    interpretation = f"THD = {thd:.1f}%. "
+    if thd < 5:
+        interpretation += "Signal quality is excellent with minimal harmonic distortion."
+    elif thd < 15:
+        interpretation += "Acceptable harmonic content for most applications."
+    else:
+        interpretation += "High harmonic distortion detected. Consider harmonic filtering."
+    
+    if dominant_harmonics:
+        # Check for odd vs even harmonics
+        odd_harmonics = [h for h in dominant_harmonics if h % 2 == 1]
+        even_harmonics = [h for h in dominant_harmonics if h % 2 == 0]
+        
+        if len(odd_harmonics) > len(even_harmonics):
+            interpretation += " Odd harmonics dominant - typical of non-linear loads or VFD operation."
+        elif len(even_harmonics) > len(odd_harmonics):
+            interpretation += " Even harmonics present - may indicate asymmetry or half-wave distortion."
+    
+    return {
+        'fundamental': {
+            'frequency': fundamental_frequency,
+            'magnitude': fundamental_magnitude,
+            'phase': 0.0  # Phase not calculated in this simplified version
+        },
+        'harmonics': harmonics_list,
+        'thd': thd,
+        'thd_interpretation': thd_interpretation,
+        'dominant_harmonics': dominant_harmonics,
+        'interpretation': interpretation
 # Statistical Process Control (SPC) Functions
 # ============================================================================
 
@@ -3137,6 +3963,219 @@ async def list_tools() -> list[Tool]:
                 },
                 "required": ["data", "target", "sigma"]
             }
+        ),
+        Tool(
+            name="fft_analysis",
+            description=(
+                "Perform Fast Fourier Transform (FFT) for frequency domain analysis. "
+                "Use cases: bearing defect detection (BPFI, BPFO, BSF), motor electrical faults, "
+                "gearbox mesh frequency analysis, pump cavitation, compressor valve problems, fan imbalance."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "signal": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Time-domain signal (vibration, current, acoustic, etc.)",
+                        "minItems": 8
+                    },
+                    "sample_rate": {
+                        "type": "number",
+                        "description": "Sampling frequency in Hz",
+                        "minimum": 1,
+                        "maximum": 1000000
+                    },
+                    "window": {
+                        "type": "string",
+                        "enum": ["hanning", "hamming", "blackman", "rectangular"],
+                        "default": "hanning",
+                        "description": "Windowing function to reduce spectral leakage"
+                    },
+                    "detrend": {
+                        "type": "boolean",
+                        "default": True,
+                        "description": "Remove DC component and linear trends"
+                    }
+                },
+                "required": ["signal", "sample_rate"]
+            }
+        ),
+        Tool(
+            name="power_spectral_density",
+            description=(
+                "Calculate Power Spectral Density (PSD) for energy distribution across frequencies. "
+                "Use cases: vibration energy distribution, noise level assessment, random vibration analysis, "
+                "process variable frequency content, acoustic signature analysis."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "signal": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Time-domain signal",
+                        "minItems": 16
+                    },
+                    "sample_rate": {
+                        "type": "number",
+                        "description": "Sampling frequency in Hz"
+                    },
+                    "method": {
+                        "type": "string",
+                        "enum": ["welch", "periodogram"],
+                        "default": "welch",
+                        "description": "PSD estimation method - Welch is more accurate for noisy signals"
+                    },
+                    "nperseg": {
+                        "type": "integer",
+                        "default": 256,
+                        "description": "Length of each segment for Welch method"
+                    }
+                },
+                "required": ["signal", "sample_rate"]
+            }
+        ),
+        Tool(
+            name="rms_value",
+            description=(
+                "Calculate Root Mean Square (RMS) for overall signal energy. "
+                "Use cases: overall vibration severity (ISO 10816), electrical current RMS, "
+                "acoustic noise level, process variable stability, alarm threshold monitoring, trend tracking."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "signal": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Time-domain signal",
+                        "minItems": 2
+                    },
+                    "window_size": {
+                        "type": "integer",
+                        "description": "Calculate rolling RMS (optional)",
+                        "minimum": 2
+                    },
+                    "reference_value": {
+                        "type": "number",
+                        "description": "Reference for dB calculation (e.g., 20 µPa for acoustic)"
+                    }
+                },
+                "required": ["signal"]
+            }
+        ),
+        Tool(
+            name="peak_detection",
+            description=(
+                "Identify significant peaks in signals with filtering and ranking. "
+                "Use cases: find dominant vibration frequencies, detect harmonic patterns, "
+                "identify resonance frequencies, bearing fault frequency detection, gear mesh frequencies."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "signal": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Signal data (time or frequency domain)",
+                        "minItems": 3
+                    },
+                    "frequencies": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Corresponding frequencies (for frequency domain data)"
+                    },
+                    "height": {
+                        "type": "number",
+                        "default": 0.1,
+                        "description": "Minimum peak height"
+                    },
+                    "distance": {
+                        "type": "integer",
+                        "default": 1,
+                        "description": "Minimum samples between peaks"
+                    },
+                    "prominence": {
+                        "type": "number",
+                        "default": 0.05,
+                        "description": "Required prominence (height above surroundings)"
+                    },
+                    "top_n": {
+                        "type": "integer",
+                        "default": 10,
+                        "maximum": 50,
+                        "description": "Return top N peaks only"
+                    }
+                },
+                "required": ["signal"]
+            }
+        ),
+        Tool(
+            name="signal_to_noise_ratio",
+            description=(
+                "Calculate Signal-to-Noise Ratio (SNR) to assess signal quality. "
+                "Use cases: sensor health monitoring, data acquisition quality check, "
+                "communication signal quality, measurement reliability, instrumentation validation."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "signal": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Signal containing signal + noise",
+                        "minItems": 10
+                    },
+                    "noise": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Noise reference (optional - will estimate if not provided)"
+                    },
+                    "method": {
+                        "type": "string",
+                        "enum": ["power", "amplitude", "peak"],
+                        "default": "power",
+                        "description": "SNR calculation method"
+                    }
+                },
+                "required": ["signal"]
+            }
+        ),
+        Tool(
+            name="harmonic_analysis",
+            description=(
+                "Detect and analyze harmonic content in electrical and mechanical signals. "
+                "Use cases: power quality assessment (THD), variable frequency drive effects, "
+                "motor current signature analysis (MCSA), electrical fault detection, IEEE 519 compliance."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "signal": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Periodic signal (voltage, current, vibration)",
+                        "minItems": 64
+                    },
+                    "sample_rate": {
+                        "type": "number",
+                        "description": "Sampling frequency in Hz"
+                    },
+                    "fundamental_freq": {
+                        "type": "number",
+                        "description": "Expected fundamental frequency (e.g., 60 Hz for electrical)",
+                        "minimum": 1
+                    },
+                    "max_harmonic": {
+                        "type": "integer",
+                        "default": 50,
+                        "maximum": 100,
+                        "description": "Maximum harmonic order to analyze"
+                    }
+                },
+                "required": ["signal", "sample_rate", "fundamental_freq"]
+            }
         )
     ]
 
@@ -3181,6 +4220,18 @@ async def call_tool(name: str, arguments: Any) -> CallToolResult:
             return await handle_rate_of_change(arguments)
         elif name == "rolling_statistics":
             return await handle_rolling_statistics(arguments)
+        elif name == "fft_analysis":
+            return await handle_fft_analysis(arguments)
+        elif name == "power_spectral_density":
+            return await handle_power_spectral_density(arguments)
+        elif name == "rms_value":
+            return await handle_rms_value(arguments)
+        elif name == "peak_detection":
+            return await handle_peak_detection(arguments)
+        elif name == "signal_to_noise_ratio":
+            return await handle_signal_to_noise_ratio(arguments)
+        elif name == "harmonic_analysis":
+            return await handle_harmonic_analysis(arguments)
         elif name == "control_limits":
             return await handle_control_limits(arguments)
         elif name == "process_capability":
@@ -3951,6 +5002,62 @@ async def handle_rolling_statistics(arguments: Any) -> CallToolResult:
         )
 
 
+async def handle_fft_analysis(arguments: Any) -> CallToolResult:
+    """Handle fft_analysis tool calls."""
+    # Extract and validate parameters
+    signal_data = arguments.get("signal")
+    sample_rate = arguments.get("sample_rate")
+    window = arguments.get("window", "hanning")
+    detrend = arguments.get("detrend", True)
+    
+    # Validate required parameters
+    if signal_data is None:
+        logger.error("Missing required parameter: signal")
+        return CallToolResult(
+            content=[TextContent(type="text", text="Missing required parameter 'signal'")],
+            isError=True,
+        )
+    
+    if sample_rate is None:
+        logger.error("Missing required parameter: sample_rate")
+        return CallToolResult(
+            content=[TextContent(type="text", text="Missing required parameter 'sample_rate'")],
+            isError=True,
+        )
+    
+    # Perform FFT analysis
+    try:
+        logger.info(f"Performing FFT analysis on {len(signal_data)} samples at {sample_rate} Hz")
+        result = fft_analysis(signal_data, sample_rate, window, detrend)
+        
+        # Format the result
+        result_text = f"FFT Analysis Results:\n\n"
+        result_text += f"Signal Properties:\n"
+        result_text += f"  Sample Rate: {result['sample_rate']:.2f} Hz\n"
+        result_text += f"  Signal Length: {result['signal_length']} samples\n"
+        result_text += f"  Duration: {result['duration_seconds']:.4f} seconds\n"
+        result_text += f"  Nyquist Frequency: {result['nyquist_frequency']:.2f} Hz\n"
+        result_text += f"  Frequency Resolution: {result['resolution']:.4f} Hz\n\n"
+        
+        result_text += f"Dominant Frequencies:\n"
+        if result['dominant_frequencies']:
+            for i, peak in enumerate(result['dominant_frequencies'][:5], 1):
+                result_text += f"  {i}. {peak['frequency']:.2f} Hz - Magnitude: {peak['magnitude']:.4f}"
+                if peak['interpretation']:
+                    result_text += f" ({peak['interpretation']})"
+                result_text += "\n"
+        else:
+            result_text += "  No dominant frequencies detected\n"
+        
+        result_text += f"\nInterpretation: {result['interpretation']}\n\n"
+        
+        result_text += f"Use Cases:\n"
+        result_text += f"  • Bearing defect detection (BPFI, BPFO, BSF frequencies)\n"
+        result_text += f"  • Motor electrical faults (broken rotor bars)\n"
+        result_text += f"  • Gearbox mesh frequency analysis\n"
+        result_text += f"  • Pump cavitation detection"
+        
+        logger.info(f"FFT analysis completed, found {len(result['dominant_frequencies'])} dominant frequencies")
 async def handle_control_limits(arguments: Any) -> CallToolResult:
     """Handle control_limits tool calls."""
     data = arguments.get("data")
@@ -4012,6 +5119,50 @@ async def handle_control_limits(arguments: Any) -> CallToolResult:
         )
 
 
+async def handle_power_spectral_density(arguments: Any) -> CallToolResult:
+    """Handle power_spectral_density tool calls."""
+    # Extract and validate parameters
+    signal_data = arguments.get("signal")
+    sample_rate = arguments.get("sample_rate")
+    method = arguments.get("method", "welch")
+    nperseg = arguments.get("nperseg", 256)
+    
+    # Validate required parameters
+    if signal_data is None:
+        logger.error("Missing required parameter: signal")
+        return CallToolResult(
+            content=[TextContent(type="text", text="Missing required parameter 'signal'")],
+            isError=True,
+        )
+    
+    if sample_rate is None:
+        logger.error("Missing required parameter: sample_rate")
+        return CallToolResult(
+            content=[TextContent(type="text", text="Missing required parameter 'sample_rate'")],
+            isError=True,
+        )
+    
+    # Calculate PSD
+    try:
+        logger.info(f"Calculating {method} PSD for {len(signal_data)} samples")
+        result = power_spectral_density(signal_data, sample_rate, method, nperseg)
+        
+        # Format the result
+        result_text = f"Power Spectral Density Analysis:\n\n"
+        result_text += f"Method: {result['method']}\n"
+        result_text += f"Total Power: {result['total_power']:.4f}\n"
+        result_text += f"Peak Frequency: {result['peak_frequency']:.2f} Hz\n"
+        result_text += f"Peak Power: {result['peak_power']:.4f}\n\n"
+        
+        result_text += f"Interpretation: {result['interpretation']}\n\n"
+        
+        result_text += f"Use Cases:\n"
+        result_text += f"  • Vibration energy distribution analysis\n"
+        result_text += f"  • Noise level assessment\n"
+        result_text += f"  • Random vibration analysis\n"
+        result_text += f"  • Acoustic signature analysis"
+        
+        logger.info(f"PSD calculated, peak at {result['peak_frequency']:.2f} Hz")
 async def handle_process_capability(arguments: Any) -> CallToolResult:
     """Handle process_capability tool calls."""
     data = arguments.get("data")
@@ -4084,6 +5235,118 @@ async def handle_process_capability(arguments: Any) -> CallToolResult:
         )
 
 
+async def handle_rms_value(arguments: Any) -> CallToolResult:
+    """Handle rms_value tool calls."""
+    # Extract and validate parameters
+    signal_data = arguments.get("signal")
+    window_size = arguments.get("window_size")
+    reference_value = arguments.get("reference_value")
+    
+    # Validate required parameter
+    if signal_data is None:
+        logger.error("Missing required parameter: signal")
+        return CallToolResult(
+            content=[TextContent(type="text", text="Missing required parameter 'signal'")],
+            isError=True,
+        )
+    
+    # Calculate RMS
+    try:
+        logger.info(f"Calculating RMS for {len(signal_data)} samples")
+        result = rms_value(signal_data, window_size, reference_value)
+        
+        # Format the result
+        result_text = f"RMS Analysis Results:\n\n"
+        result_text += f"Overall RMS: {result['rms']:.4f}\n"
+        result_text += f"Peak Value: {result['peak']:.4f}\n"
+        result_text += f"Crest Factor: {result['crest_factor']:.2f}\n"
+        
+        if 'rms_db' in result:
+            result_text += f"RMS (dB): {result['rms_db']:.2f} dB\n"
+        
+        result_text += f"\nInterpretation: {result['interpretation']}\n"
+        
+        if 'rolling_rms' in result:
+            rolling = result['rolling_rms']
+            result_text += f"\nRolling RMS Statistics:\n"
+            result_text += f"  Number of windows: {len(rolling)}\n"
+            result_text += f"  Trend: {result['trend']}\n"
+            if len(rolling) <= 10:
+                result_text += f"  Values: {', '.join(f'{v:.4f}' for v in rolling)}\n"
+            else:
+                result_text += f"  First 5: {', '.join(f'{v:.4f}' for v in rolling[:5])}\n"
+                result_text += f"  Last 5: {', '.join(f'{v:.4f}' for v in rolling[-5:])}\n"
+        
+        result_text += f"\nUse Cases:\n"
+        result_text += f"  • Overall vibration severity (ISO 10816)\n"
+        result_text += f"  • Electrical current RMS for power calculations\n"
+        result_text += f"  • Acoustic noise level assessment\n"
+        result_text += f"  • Process variable stability monitoring"
+        
+        logger.info(f"RMS calculated: {result['rms']:.4f}")
+        
+        return CallToolResult(
+            content=[TextContent(type="text", text=result_text)],
+            isError=False,
+        )
+        
+    except ValueError as e:
+        logger.error(f"Validation error: {e}")
+        return CallToolResult(
+            content=[TextContent(type="text", text=f"Validation error: {str(e)}")],
+            isError=True,
+        )
+
+
+async def handle_peak_detection(arguments: Any) -> CallToolResult:
+    """Handle peak_detection tool calls."""
+    # Extract and validate parameters
+    signal_data = arguments.get("signal")
+    frequencies = arguments.get("frequencies")
+    height = arguments.get("height", 0.1)
+    distance = arguments.get("distance", 1)
+    prominence = arguments.get("prominence", 0.05)
+    top_n = arguments.get("top_n", 10)
+    
+    # Validate required parameter
+    if signal_data is None:
+        logger.error("Missing required parameter: signal")
+        return CallToolResult(
+            content=[TextContent(type="text", text="Missing required parameter 'signal'")],
+            isError=True,
+        )
+    
+    # Detect peaks
+    try:
+        logger.info(f"Detecting peaks in signal with {len(signal_data)} samples")
+        result = peak_detection(signal_data, frequencies, height, distance, prominence, top_n)
+        
+        # Format the result
+        result_text = f"Peak Detection Results:\n\n"
+        result_text += f"Total Peaks Found: {result['peaks_found']}\n"
+        result_text += f"Interpretation: {result['interpretation']}\n\n"
+        
+        if result['top_peaks']:
+            result_text += f"Top Peaks:\n"
+            for peak in result['top_peaks']:
+                result_text += f"  Rank {peak['rank']}: "
+                if 'frequency' in peak:
+                    result_text += f"Frequency {peak['frequency']:.2f} Hz, "
+                result_text += f"Magnitude {peak['magnitude']:.4f}, "
+                result_text += f"Prominence {peak['prominence']:.4f}"
+                if 'interpretation' in peak and peak['interpretation']:
+                    result_text += f" - {peak['interpretation']}"
+                result_text += "\n"
+        else:
+            result_text += "No significant peaks detected.\n"
+        
+        result_text += f"\nUse Cases:\n"
+        result_text += f"  • Find dominant vibration frequencies\n"
+        result_text += f"  • Detect harmonic patterns in power quality\n"
+        result_text += f"  • Identify resonance frequencies\n"
+        result_text += f"  • Bearing fault frequency detection"
+        
+        logger.info(f"Peak detection completed, found {result['peaks_found']} peaks")
 async def handle_western_electric_rules(arguments: Any) -> CallToolResult:
     """Handle western_electric_rules tool calls."""
     data = arguments.get("data")
@@ -4152,6 +5415,43 @@ async def handle_western_electric_rules(arguments: Any) -> CallToolResult:
         )
 
 
+async def handle_signal_to_noise_ratio(arguments: Any) -> CallToolResult:
+    """Handle signal_to_noise_ratio tool calls."""
+    # Extract and validate parameters
+    signal_data = arguments.get("signal")
+    noise_data = arguments.get("noise")
+    method = arguments.get("method", "power")
+    
+    # Validate required parameter
+    if signal_data is None:
+        logger.error("Missing required parameter: signal")
+        return CallToolResult(
+            content=[TextContent(type="text", text="Missing required parameter 'signal'")],
+            isError=True,
+        )
+    
+    # Calculate SNR
+    try:
+        logger.info(f"Calculating SNR using {method} method")
+        result = signal_to_noise_ratio(signal_data, noise_data, method)
+        
+        # Format the result
+        result_text = f"Signal-to-Noise Ratio Analysis:\n\n"
+        result_text += f"SNR: {result['snr_db']:.2f} dB\n"
+        result_text += f"SNR Ratio: {result['snr_ratio']:.2f}\n"
+        result_text += f"Signal Power: {result['signal_power']:.4f}\n"
+        result_text += f"Noise Power: {result['noise_power']:.4f}\n"
+        result_text += f"Quality: {result['quality']}\n\n"
+        
+        result_text += f"Interpretation: {result['interpretation']}\n\n"
+        
+        result_text += f"Use Cases:\n"
+        result_text += f"  • Sensor health monitoring\n"
+        result_text += f"  • Data acquisition quality check\n"
+        result_text += f"  • Process measurement reliability\n"
+        result_text += f"  • Instrumentation validation"
+        
+        logger.info(f"SNR calculated: {result['snr_db']:.2f} dB ({result['quality']})")
 async def handle_cusum_chart(arguments: Any) -> CallToolResult:
     """Handle cusum_chart tool calls."""
     data = arguments.get("data")
@@ -4216,6 +5516,70 @@ async def handle_cusum_chart(arguments: Any) -> CallToolResult:
         )
 
 
+async def handle_harmonic_analysis(arguments: Any) -> CallToolResult:
+    """Handle harmonic_analysis tool calls."""
+    # Extract and validate parameters
+    signal_data = arguments.get("signal")
+    sample_rate = arguments.get("sample_rate")
+    fundamental_freq = arguments.get("fundamental_freq")
+    max_harmonic = arguments.get("max_harmonic", 50)
+    
+    # Validate required parameters
+    if signal_data is None:
+        logger.error("Missing required parameter: signal")
+        return CallToolResult(
+            content=[TextContent(type="text", text="Missing required parameter 'signal'")],
+            isError=True,
+        )
+    
+    if sample_rate is None:
+        logger.error("Missing required parameter: sample_rate")
+        return CallToolResult(
+            content=[TextContent(type="text", text="Missing required parameter 'sample_rate'")],
+            isError=True,
+        )
+    
+    if fundamental_freq is None:
+        logger.error("Missing required parameter: fundamental_freq")
+        return CallToolResult(
+            content=[TextContent(type="text", text="Missing required parameter 'fundamental_freq'")],
+            isError=True,
+        )
+    
+    # Perform harmonic analysis
+    try:
+        logger.info(f"Performing harmonic analysis with fundamental {fundamental_freq} Hz")
+        result = harmonic_analysis(signal_data, sample_rate, fundamental_freq, max_harmonic)
+        
+        # Format the result
+        result_text = f"Harmonic Analysis Results:\n\n"
+        result_text += f"Fundamental Frequency:\n"
+        result_text += f"  Frequency: {result['fundamental']['frequency']:.2f} Hz\n"
+        result_text += f"  Magnitude: {result['fundamental']['magnitude']:.4f}\n\n"
+        
+        result_text += f"Total Harmonic Distortion (THD): {result['thd']:.2f}%\n"
+        result_text += f"Assessment: {result['thd_interpretation']}\n\n"
+        
+        if result['dominant_harmonics']:
+            result_text += f"Dominant Harmonics: {', '.join(map(str, result['dominant_harmonics']))}\n\n"
+        
+        if result['harmonics']:
+            result_text += f"Harmonic Components (showing top 10):\n"
+            for i, harm in enumerate(result['harmonics'][:10], 1):
+                result_text += f"  H{harm['order']}: {harm['frequency']:.2f} Hz, "
+                result_text += f"Magnitude {harm['magnitude']:.4f} ({harm['percent']:.1f}% of fundamental)\n"
+        else:
+            result_text += "No significant harmonics detected.\n"
+        
+        result_text += f"\nInterpretation: {result['interpretation']}\n\n"
+        
+        result_text += f"Use Cases:\n"
+        result_text += f"  • Power quality assessment (THD calculation)\n"
+        result_text += f"  • Variable frequency drive (VFD) effects\n"
+        result_text += f"  • Motor current signature analysis (MCSA)\n"
+        result_text += f"  • IEEE 519 compliance verification"
+        
+        logger.info(f"Harmonic analysis completed, THD = {result['thd']:.2f}%")
 async def handle_ewma_chart(arguments: Any) -> CallToolResult:
     """Handle ewma_chart tool calls."""
     data = arguments.get("data")

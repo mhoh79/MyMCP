@@ -30,6 +30,13 @@ Dedicated statistical analysis tools:
   - **Change Point Detection**: Detect process upsets, modifications, and regime changes
   - **Rate of Change**: Monitor acceleration/deceleration for safety and startup monitoring
   - **Rolling Statistics**: Continuous windowed statistics for SCADA displays
+- **Signal Processing**: 6 comprehensive tools for vibration monitoring and electrical analysis
+  - **FFT Analysis**: Frequency domain analysis for bearing defects, motor faults, and gear mesh
+  - **Power Spectral Density**: Energy distribution across frequencies for vibration and noise
+  - **RMS Value**: Overall signal energy with ISO 10816 compliance and rolling statistics
+  - **Peak Detection**: Identify dominant frequencies, harmonics, and resonances
+  - **Signal-to-Noise Ratio**: Assess sensor health and data acquisition quality
+  - **Harmonic Analysis**: THD calculation, power quality, and IEEE 519 compliance
 - **Statistical Process Control (SPC)**: 5 essential tools for manufacturing quality control and Six Sigma
   - **Control Limits**: Calculate UCL, LCL, centerline for X-bar, Individuals, Range, S, p, np, c, u charts
   - **Process Capability**: Cp, Cpk, Pp, Ppk indices with sigma level and estimated PPM defects
@@ -206,6 +213,17 @@ Once configured, you can interact with the server through Claude:
 
 **For detailed time series documentation and industrial use cases, see [TIME_SERIES_TOOLS.md](TIME_SERIES_TOOLS.md)**
 
+### Signal Processing Analysis (Stats Server)
+```
+"Perform FFT analysis on bearing vibration data at 10 kHz sampling rate"
+"Calculate power spectral density of acoustic signal from pump"
+"Compute RMS vibration level for ISO 10816 compliance check"
+"Detect dominant frequency peaks in motor current spectrum"
+"Calculate signal-to-noise ratio to validate accelerometer health"
+"Analyze harmonics in 60 Hz voltage waveform and calculate THD"
+```
+
+**For detailed signal processing documentation and industrial workflows, see [SIGNAL_PROCESSING_TOOLS.md](SIGNAL_PROCESSING_TOOLS.md)**
 ### Statistical Process Control (SPC) Tools (Stats Server)
 ```
 "Calculate control limits for these process measurements using an individuals chart"
