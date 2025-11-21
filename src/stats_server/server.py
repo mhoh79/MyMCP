@@ -2140,6 +2140,10 @@ def harmonic_analysis(signal_data: list[float], sample_rate: float, fundamental_
         'thd_interpretation': thd_interpretation,
         'dominant_harmonics': dominant_harmonics,
         'interpretation': interpretation
+    }
+
+
+# ============================================================================
 # Statistical Process Control (SPC) Functions
 # ============================================================================
 
@@ -5058,6 +5062,19 @@ async def handle_fft_analysis(arguments: Any) -> CallToolResult:
         result_text += f"  • Pump cavitation detection"
         
         logger.info(f"FFT analysis completed, found {len(result['dominant_frequencies'])} dominant frequencies")
+        
+        return CallToolResult(
+            content=[TextContent(type="text", text=result_text)],
+            isError=False
+        )
+    except Exception as e:
+        logger.error(f"Error in fft_analysis: {str(e)}")
+        return CallToolResult(
+            content=[TextContent(type="text", text=f"Error performing FFT analysis: {str(e)}")],
+            isError=True
+        )
+
+
 async def handle_control_limits(arguments: Any) -> CallToolResult:
     """Handle control_limits tool calls."""
     data = arguments.get("data")
@@ -5163,6 +5180,19 @@ async def handle_power_spectral_density(arguments: Any) -> CallToolResult:
         result_text += f"  • Acoustic signature analysis"
         
         logger.info(f"PSD calculated, peak at {result['peak_frequency']:.2f} Hz")
+        
+        return CallToolResult(
+            content=[TextContent(type="text", text=result_text)],
+            isError=False
+        )
+    except Exception as e:
+        logger.error(f"Error in power_spectral_density: {str(e)}")
+        return CallToolResult(
+            content=[TextContent(type="text", text=f"Error calculating PSD: {str(e)}")],
+            isError=True
+        )
+
+
 async def handle_process_capability(arguments: Any) -> CallToolResult:
     """Handle process_capability tool calls."""
     data = arguments.get("data")
@@ -5347,6 +5377,19 @@ async def handle_peak_detection(arguments: Any) -> CallToolResult:
         result_text += f"  • Bearing fault frequency detection"
         
         logger.info(f"Peak detection completed, found {result['peaks_found']} peaks")
+        
+        return CallToolResult(
+            content=[TextContent(type="text", text=result_text)],
+            isError=False
+        )
+    except Exception as e:
+        logger.error(f"Error in peak_detection: {str(e)}")
+        return CallToolResult(
+            content=[TextContent(type="text", text=f"Error detecting peaks: {str(e)}")],
+            isError=True
+        )
+
+
 async def handle_western_electric_rules(arguments: Any) -> CallToolResult:
     """Handle western_electric_rules tool calls."""
     data = arguments.get("data")
@@ -5452,6 +5495,19 @@ async def handle_signal_to_noise_ratio(arguments: Any) -> CallToolResult:
         result_text += f"  • Instrumentation validation"
         
         logger.info(f"SNR calculated: {result['snr_db']:.2f} dB ({result['quality']})")
+        
+        return CallToolResult(
+            content=[TextContent(type="text", text=result_text)],
+            isError=False
+        )
+    except Exception as e:
+        logger.error(f"Error in signal_to_noise_ratio: {str(e)}")
+        return CallToolResult(
+            content=[TextContent(type="text", text=f"Error calculating SNR: {str(e)}")],
+            isError=True
+        )
+
+
 async def handle_cusum_chart(arguments: Any) -> CallToolResult:
     """Handle cusum_chart tool calls."""
     data = arguments.get("data")
@@ -5580,6 +5636,19 @@ async def handle_harmonic_analysis(arguments: Any) -> CallToolResult:
         result_text += f"  • IEEE 519 compliance verification"
         
         logger.info(f"Harmonic analysis completed, THD = {result['thd']:.2f}%")
+        
+        return CallToolResult(
+            content=[TextContent(type="text", text=result_text)],
+            isError=False
+        )
+    except Exception as e:
+        logger.error(f"Error in harmonic_analysis: {str(e)}")
+        return CallToolResult(
+            content=[TextContent(type="text", text=f"Error performing harmonic analysis: {str(e)}")],
+            isError=True
+        )
+
+
 async def handle_ewma_chart(arguments: Any) -> CallToolResult:
     """Handle ewma_chart tool calls."""
     data = arguments.get("data")

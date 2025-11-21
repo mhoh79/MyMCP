@@ -1,9 +1,15 @@
 {
   "mcpServers": {
-    "fibonacci": {
+    "math-server": {
       "command": "c:\\Users\\matti\\OneDrive\\Github\\MyMCP\\venv\\Scripts\\python.exe",
       "args": [
-        "c:\\Users\\matti\\OneDrive\\Github\\MyMCP\\src\\fibonacci_server\\server.py"
+        "c:\\Users\\matti\\OneDrive\\Github\\MyMCP\\src\\math_server\\server.py"
+      ]
+    },
+    "stats-server": {
+      "command": "c:\\Users\\matti\\OneDrive\\Github\\MyMCP\\venv\\Scripts\\python.exe",
+      "args": [
+        "c:\\Users\\matti\\OneDrive\\Github\\MyMCP\\src\\stats_server\\server.py"
       ]
     }
   }
