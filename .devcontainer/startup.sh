@@ -66,8 +66,13 @@ echo ""
 
 # Get API key from environment or generate a random one for demo
 if [ -z "$MCP_API_KEY" ]; then
-    # Generate a random API key for this session
-    API_KEY="demo-$(openssl rand -hex 16 2>/dev/null || cat /dev/urandom | tr -dc 'a-f0-9' | head -c 32)"
+    # Generate a random API key for this session using openssl
+    if command -v openssl >/dev/null 2>&1; then
+        API_KEY="demo-$(openssl rand -hex 16)"
+    else
+        # Fallback: generate using /dev/urandom with validation
+        API_KEY="demo-$(head -c 16 /dev/urandom | xxd -p -c 32)"
+    fi
     echo "  ⚠️  Generated temporary API key for this session."
     echo "     For production, set MCP_API_KEY in Codespaces Secrets."
 else
@@ -212,11 +217,19 @@ echo "  tail -f /tmp/math_server_prod.log"
 echo "  tail -f /tmp/stats_server_prod.log"
 echo ""
 echo "Test authentication:"
-echo "  # Without auth (should fail on prod):"
-echo "  curl https://${CODESPACE_NAME:-localhost}-9000.app.github.dev/messages"
-echo ""
-echo "  # With auth (should succeed on prod):"
-echo "  curl -H \"Authorization: Bearer \$MCP_API_KEY\" https://${CODESPACE_NAME:-localhost}-9000.app.github.dev/health"
+if [ -n "$CODESPACE_NAME" ]; then
+    echo "  # Without auth (should fail on prod):"
+    echo "  curl https://${CODESPACE_NAME}-9000.app.github.dev/messages"
+    echo ""
+    echo "  # With auth (should succeed on prod):"
+    echo "  curl -H \"Authorization: Bearer \$MCP_API_KEY\" https://${CODESPACE_NAME}-9000.app.github.dev/health"
+else
+    echo "  # Without auth (should fail on prod):"
+    echo "  curl http://localhost:9000/messages"
+    echo ""
+    echo "  # With auth (should succeed on prod):"
+    echo "  curl -H \"Authorization: Bearer \$MCP_API_KEY\" http://localhost:9000/health"
+fi
 echo ""
 echo "  # Note: Use the API key from your environment variable or the one generated above"
 echo ""

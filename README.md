@@ -1293,13 +1293,13 @@ curl -X POST https://<codespace-name>-8000.app.github.dev/messages \
 curl https://<codespace-name>-9000.app.github.dev/health
 
 # With authentication (should succeed)
-curl -H "Authorization: Bearer demo-api-key-for-testing-only" \
+curl -H "Authorization: Bearer <your-api-key>" \
   https://<codespace-name>-9000.app.github.dev/health
 
 # Test a tool with authentication
 curl -X POST https://<codespace-name>-9000.app.github.dev/messages \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer demo-api-key-for-testing-only" \
+  -H "Authorization: Bearer <your-api-key>" \
   -d '{
     "jsonrpc": "2.0",
     "method": "tools/call",
