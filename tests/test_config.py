@@ -237,7 +237,8 @@ class TestCustomServerValidation:
     
     def test_port_conflict_with_reserved_ports(self):
         """Test that custom server port conflicts with reserved ports."""
-        reserved_ports = [8000, 8001, 9000, 9001]
+        from src.config import RESERVED_BUILTIN_PORTS
+        reserved_ports = list(RESERVED_BUILTIN_PORTS)
         for port in reserved_ports:
             servers = [
                 CustomServerConfig(name=f"server-{port}", module="custom.server", port=port),

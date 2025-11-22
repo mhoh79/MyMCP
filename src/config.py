@@ -15,6 +15,10 @@ from pydantic import BaseModel, Field, field_validator, ValidationError
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+# Reserved ports for builtin MCP servers
+RESERVED_BUILTIN_PORTS: set[int] = {8000, 8001, 9000, 9001}
+
+
 class ServerConfig(BaseModel):
     """Configuration for a single server instance."""
     
@@ -179,7 +183,6 @@ class Config(BaseSettings):
             )
         
         # Collect all ports to check for conflicts
-        builtin_ports = {8000, 8001, 9000, 9001}  # Reserved for builtin servers
         custom_ports = [server.port for server in v if server.enabled]
         
         # Check for duplicate ports among custom servers
@@ -191,11 +194,11 @@ class Config(BaseSettings):
             )
         
         # Check for conflicts with builtin server ports
-        conflicting_ports = [port for port in custom_ports if port in builtin_ports]
+        conflicting_ports = [port for port in custom_ports if port in RESERVED_BUILTIN_PORTS]
         if conflicting_ports:
             raise ValueError(
                 f"Custom server ports conflict with builtin server ports: {', '.join(map(str, conflicting_ports))}. "
-                f"Ports {', '.join(map(str, sorted(builtin_ports)))} are reserved for builtin servers. "
+                f"Ports {', '.join(map(str, sorted(RESERVED_BUILTIN_PORTS)))} are reserved for builtin servers. "
                 "Please use different ports for custom servers."
             )
         
