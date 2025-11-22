@@ -35,6 +35,7 @@ from mcp.types import (
 
 # HTTP transport imports
 from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 import uvicorn
 from sse_starlette.sse import EventSourceResponse
 import json
@@ -5048,8 +5049,6 @@ async def run_http_server(host: str = "0.0.0.0", port: int = 8000, config_path: 
         Readiness check endpoint - indicates if server is ready to accept requests.
         Returns 200 if ready, 503 if not ready.
         """
-        from fastapi.responses import JSONResponse
-        
         if server_state.mcp_initialized:
             # Get tools count
             tools_list = await list_tools()
