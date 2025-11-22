@@ -22,9 +22,11 @@ docker-compose.yml
 .pids
 tests/
 *.log
-# Exclude development scripts (not needed in container)
+# Exclude development and test scripts (not needed in container)
+# All scripts are for local development; containers run servers via Python modules
 *.ps1
 *.sh
+scripts/
 # Exclude example and test configs
 config.*.yaml
 !config.example.yaml
