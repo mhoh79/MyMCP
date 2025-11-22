@@ -30,14 +30,15 @@ class ServerConfig(BaseModel):
         return v
 
 
-class CustomServerConfig(BaseModel):
+class CustomServerConfig(ServerConfig):
     """Configuration for a custom MCP server."""
     
     name: str = Field(description="Unique name for the custom server")
     module: str = Field(description="Python module path (e.g., 'custom.my_server')")
-    host: str = Field(default="0.0.0.0", description="Server host address")
-    port: int = Field(ge=1, le=65535, description="Server port")
     enabled: bool = Field(default=True, description="Whether the server is enabled")
+    
+    # Override port to remove default value (required for custom servers)
+    port: int = Field(ge=1, le=65535, description="Server port")
     
     @field_validator("name")
     @classmethod
@@ -62,14 +63,6 @@ class CustomServerConfig(BaseModel):
             raise ValueError(
                 f"Module path '{v}' must be a valid Python module path (e.g., 'custom.my_server')"
             )
-        return v
-    
-    @field_validator("host")
-    @classmethod
-    def validate_host(cls, v: str) -> str:
-        """Validate host address format."""
-        if not v:
-            raise ValueError("Host cannot be empty")
         return v
 
 
