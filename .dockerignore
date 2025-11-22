@@ -31,7 +31,6 @@ scripts/
 config.*.yaml
 !config.example.yaml
 # Exclude other development files
-scripts/
 get_custom_servers.py
 mcp-config.json
 nginx.conf
