@@ -103,17 +103,18 @@ trap cleanup EXIT INT TERM
 if [ "$START_SERVER" = "yes" ]; then
     echo -e "${GREEN}Starting MCP HTTP server...${NC}"
     
-    CMD="python src/math_server/server.py --transport http --host 127.0.0.1 --port $SERVER_PORT"
+    # Build command as array for proper quoting
+    CMD_ARGS=(python src/math_server/server.py --transport http --host 127.0.0.1 --port "$SERVER_PORT")
     
     if [ -n "$CONFIG_FILE" ]; then
-        CMD="$CMD --config $CONFIG_FILE"
+        CMD_ARGS+=(--config "$CONFIG_FILE")
         echo "Using config file: $CONFIG_FILE"
     fi
     
-    echo "Command: $CMD"
+    echo "Command: ${CMD_ARGS[*]}"
     
     # Start server in background
-    $CMD &
+    "${CMD_ARGS[@]}" &
     SERVER_PID=$!
     echo "Server PID: $SERVER_PID"
     

@@ -104,7 +104,6 @@ class MCPHTTPClient:
                         if line.strip():
                             # Successfully received data
                             return True
-                            break
                     
                     return False
                     
