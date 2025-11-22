@@ -17,6 +17,8 @@ import sys
 from pathlib import Path
 
 # Add project root to Python path
+# This wrapper script is located in the project root, so Path(__file__).parent
+# gives us the correct project root directory that needs to be in sys.path
 project_root = Path(__file__).parent
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
