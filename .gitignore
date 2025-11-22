@@ -73,3 +73,9 @@ config-test-*.yaml
 .coverage.*
 htmlcov/
 .pytest_cache/
+
+# Custom MCP servers (user-created)
+# Users should manage their own custom servers separately
+src/custom/*
+!src/custom/__init__.py
+!src/custom/README.md
