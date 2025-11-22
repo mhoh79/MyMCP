@@ -1,0 +1,31 @@
+{
+  "name": "MCP Servers",
+  "image": "mcr.microsoft.com/devcontainers/python:3.11",
+  "forwardPorts": [8000, 8001],
+  "portsAttributes": {
+    "8000": {
+      "label": "Math Server",
+      "onAutoForward": "notify",
+      "visibility": "public"
+    },
+    "8001": {
+      "label": "Stats Server",
+      "onAutoForward": "notify",
+      "visibility": "public"
+    }
+  },
+  "postCreateCommand": "python -m pip install -r requirements.txt",
+  "postStartCommand": "bash .devcontainer/startup.sh",
+  "containerEnv": {
+    "MCP_AUTH_ENABLED": "false",
+    "MCP_RATE_LIMIT_ENABLED": "false"
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance"
+      ]
+    }
+  }
+}
