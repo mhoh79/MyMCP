@@ -1,0 +1,36 @@
+# MCP Servers Configuration - Development Mode
+# This configuration is for development/testing in GitHub Codespaces
+# - No authentication required
+# - Debug logging enabled
+# - Private endpoints for debugging
+
+# Server Configuration
+server:
+  # Math Server Configuration (Dev Mode)
+  math:
+    host: "0.0.0.0"
+    port: 8000
+  
+  # Stats Server Configuration (Dev Mode)
+  stats:
+    host: "0.0.0.0"
+    port: 8001
+  
+  # CORS Configuration
+  cors_origins:
+    - "http://localhost:*"
+    - "https://*.app.github.dev"
+
+# Authentication Configuration (DISABLED for dev mode)
+authentication:
+  enabled: false
+  api_key: "dev-mode-no-auth-required"
+
+# Rate Limiting Configuration (DISABLED for dev mode)
+rate_limiting:
+  enabled: false
+  requests_per_minute: 120
+
+# Logging Configuration (DEBUG for dev mode)
+logging:
+  level: "DEBUG"

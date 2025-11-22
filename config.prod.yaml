@@ -1,0 +1,37 @@
+# MCP Servers Configuration - Production Mode
+# This configuration simulates production settings in GitHub Codespaces
+# - Authentication REQUIRED with API key
+# - Info logging level
+# - Public endpoints with authentication
+
+# Server Configuration
+server:
+  # Math Server Configuration (Prod Mode)
+  math:
+    host: "0.0.0.0"
+    port: 9000
+  
+  # Stats Server Configuration (Prod Mode)
+  stats:
+    host: "0.0.0.0"
+    port: 9001
+  
+  # CORS Configuration
+  cors_origins:
+    - "http://localhost:*"
+    - "https://*.app.github.dev"
+
+# Authentication Configuration (ENABLED for prod mode)
+# API key will be set via MCP_API_KEY environment variable from Codespaces Secrets
+authentication:
+  enabled: true
+  api_key: "REPLACE-WITH-SECURE-KEY-FROM-ENVIRONMENT"
+
+# Rate Limiting Configuration (ENABLED for prod mode)
+rate_limiting:
+  enabled: true
+  requests_per_minute: 60
+
+# Logging Configuration (INFO for prod mode)
+logging:
+  level: "INFO"

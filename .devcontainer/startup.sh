@@ -3,8 +3,10 @@
 # Startup script for MCP servers in GitHub Codespaces
 # This script:
 # 1. Creates config.yaml from config.example.yaml if it doesn't exist
-# 2. Starts both math and stats servers in HTTP mode in the background
-# 3. Displays public URLs for accessing the servers
+# 2. Starts dev servers (8000-8001) with no authentication
+# 3. Starts prod servers (9000-9001) with authentication
+# 4. Verifies health of all server instances
+# 5. Displays public URLs for accessing the servers
 
 set -e  # Exit on error
 
@@ -13,7 +15,12 @@ echo "  MCP Servers - GitHub Codespaces Startup  "
 echo "============================================"
 echo ""
 
-# Step 1: Create config.yaml if it doesn't exist
+# Detect environment mode (default: "codespace")
+ENVIRONMENT="${ENVIRONMENT:-codespace}"
+echo "🔧 Environment Mode: $ENVIRONMENT"
+echo ""
+
+# Step 1: Create config.yaml if it doesn't exist (for backward compatibility)
 if [ ! -f "config.yaml" ]; then
     echo "📝 Creating config.yaml from config.example.yaml..."
     cp config.example.yaml config.yaml
@@ -35,66 +42,118 @@ if [ ! -f "src/stats_server/server.py" ]; then
     exit 1
 fi
 
-# Step 3: Start Math Server (port 8000)
-echo "🚀 Starting Math Server on port 8000..."
-nohup python src/math_server/server.py --transport http --host 0.0.0.0 --port 8000 --config config.yaml > /tmp/math_server.log 2>&1 &
-MATH_PID=$!
-echo "   Process started (PID: $MATH_PID)"
+# Step 3: Start DEV servers (ports 8000-8001, no authentication)
+echo "🚀 Starting DEV servers (no authentication)..."
+echo ""
 
-# Step 4: Start Stats Server (port 8001)
-echo "🚀 Starting Stats Server on port 8001..."
-nohup python src/stats_server/server.py --transport http --host 0.0.0.0 --port 8001 --config config.yaml > /tmp/stats_server.log 2>&1 &
-STATS_PID=$!
-echo "   Process started (PID: $STATS_PID)"
+# Start Math Server (Dev - port 8000)
+echo "  📊 Math Server (Dev) on port 8000..."
+MCP_AUTH_ENABLED=false nohup python src/math_server/server.py --transport http --host 0.0.0.0 --port 8000 --config config.dev.yaml > /tmp/math_server_dev.log 2>&1 &
+MATH_DEV_PID=$!
+echo "     Process started (PID: $MATH_DEV_PID)"
+
+# Start Stats Server (Dev - port 8001)
+echo "  📈 Stats Server (Dev) on port 8001..."
+MCP_AUTH_ENABLED=false nohup python src/stats_server/server.py --transport http --host 0.0.0.0 --port 8001 --config config.dev.yaml > /tmp/stats_server_dev.log 2>&1 &
+STATS_DEV_PID=$!
+echo "     Process started (PID: $STATS_DEV_PID)"
+
+echo ""
+
+# Step 4: Start PROD servers (ports 9000-9001, with authentication)
+echo "🔐 Starting PROD servers (authentication required)..."
+echo ""
+
+# Get API key from environment or use default for demo
+API_KEY="${MCP_API_KEY:-demo-api-key-for-testing-only}"
+if [ "$API_KEY" = "demo-api-key-for-testing-only" ]; then
+    echo "  ⚠️  Using demo API key. Set MCP_API_KEY in Codespaces Secrets for production."
+fi
+
+# Start Math Server (Prod - port 9000)
+echo "  📊 Math Server (Prod) on port 9000..."
+MCP_AUTH_ENABLED=true MCP_API_KEY="$API_KEY" nohup python src/math_server/server.py --transport http --host 0.0.0.0 --port 9000 --config config.prod.yaml > /tmp/math_server_prod.log 2>&1 &
+MATH_PROD_PID=$!
+echo "     Process started (PID: $MATH_PROD_PID)"
+
+# Start Stats Server (Prod - port 9001)
+echo "  📈 Stats Server (Prod) on port 9001..."
+MCP_AUTH_ENABLED=true MCP_API_KEY="$API_KEY" nohup python src/stats_server/server.py --transport http --host 0.0.0.0 --port 9001 --config config.prod.yaml > /tmp/stats_server_prod.log 2>&1 &
+STATS_PROD_PID=$!
+echo "     Process started (PID: $STATS_PROD_PID)"
 
 echo ""
 
 # Step 5: Wait for servers to start and verify they're healthy
+echo ""
 echo "⏳ Waiting for servers to initialize..."
-MATH_READY=false
-STATS_READY=false
+MATH_DEV_READY=false
+STATS_DEV_READY=false
+MATH_PROD_READY=false
+STATS_PROD_READY=false
 MAX_ATTEMPTS=30  # 30 seconds max wait time
 
 for _ in $(seq 1 $MAX_ATTEMPTS); do
-    # Check if Math Server is ready
-    if [ "$MATH_READY" = false ] && curl -s http://localhost:8000/health > /dev/null 2>&1; then
-        MATH_READY=true
-        echo "✅ Math Server is healthy"
+    # Check DEV servers
+    if [ "$MATH_DEV_READY" = false ] && curl -s http://localhost:8000/health > /dev/null 2>&1; then
+        MATH_DEV_READY=true
+        echo "✅ Math Server (Dev) is healthy"
     fi
     
-    # Check if Stats Server is ready
-    if [ "$STATS_READY" = false ] && curl -s http://localhost:8001/health > /dev/null 2>&1; then
-        STATS_READY=true
-        echo "✅ Stats Server is healthy"
+    if [ "$STATS_DEV_READY" = false ] && curl -s http://localhost:8001/health > /dev/null 2>&1; then
+        STATS_DEV_READY=true
+        echo "✅ Stats Server (Dev) is healthy"
     fi
     
-    # Exit loop if both servers are ready
-    if [ "$MATH_READY" = true ] && [ "$STATS_READY" = true ]; then
+    # Check PROD servers (with authentication)
+    if [ "$MATH_PROD_READY" = false ] && curl -s -H "Authorization: Bearer $API_KEY" http://localhost:9000/health > /dev/null 2>&1; then
+        MATH_PROD_READY=true
+        echo "✅ Math Server (Prod) is healthy"
+    fi
+    
+    if [ "$STATS_PROD_READY" = false ] && curl -s -H "Authorization: Bearer $API_KEY" http://localhost:9001/health > /dev/null 2>&1; then
+        STATS_PROD_READY=true
+        echo "✅ Stats Server (Prod) is healthy"
+    fi
+    
+    # Exit loop if all servers are ready
+    if [ "$MATH_DEV_READY" = true ] && [ "$STATS_DEV_READY" = true ] && [ "$MATH_PROD_READY" = true ] && [ "$STATS_PROD_READY" = true ]; then
         break
     fi
     
     sleep 1
 done
 
-# Check if servers started successfully
-if [ "$MATH_READY" = false ]; then
-    echo "⚠️  Math Server failed to start or is not responding"
-    echo "   Check logs: tail -f /tmp/math_server.log"
+# Report status of servers
+echo ""
+if [ "$MATH_DEV_READY" = false ]; then
+    echo "⚠️  Math Server (Dev) failed to start or is not responding"
+    echo "   Check logs: tail -f /tmp/math_server_dev.log"
 fi
 
-if [ "$STATS_READY" = false ]; then
-    echo "⚠️  Stats Server failed to start or is not responding"
-    echo "   Check logs: tail -f /tmp/stats_server.log"
+if [ "$STATS_DEV_READY" = false ]; then
+    echo "⚠️  Stats Server (Dev) failed to start or is not responding"
+    echo "   Check logs: tail -f /tmp/stats_server_dev.log"
 fi
 
-# Exit if both servers failed
-if [ "$MATH_READY" = false ] && [ "$STATS_READY" = false ]; then
+if [ "$MATH_PROD_READY" = false ]; then
+    echo "⚠️  Math Server (Prod) failed to start or is not responding"
+    echo "   Check logs: tail -f /tmp/math_server_prod.log"
+fi
+
+if [ "$STATS_PROD_READY" = false ]; then
+    echo "⚠️  Stats Server (Prod) failed to start or is not responding"
+    echo "   Check logs: tail -f /tmp/stats_server_prod.log"
+fi
+
+# Exit if all servers failed
+if [ "$MATH_DEV_READY" = false ] && [ "$STATS_DEV_READY" = false ] && [ "$MATH_PROD_READY" = false ] && [ "$STATS_PROD_READY" = false ]; then
     echo ""
-    echo "❌ Both servers failed to start. Please check the logs above."
+    echo "❌ All servers failed to start. Please check the logs above."
     exit 1
 fi
 
-# Step 6: Display public URLs
+# Step 6: Display server URLs
 echo ""
 echo "============================================"
 echo "  📡 Server URLs                           "
@@ -102,15 +161,28 @@ echo "============================================"
 echo ""
 
 # Get the Codespace name from environment variable
-# Note: GitHub Codespaces URL format is subject to change by GitHub
 if [ -n "$CODESPACE_NAME" ]; then
-    echo "Math Server:  https://${CODESPACE_NAME}-8000.app.github.dev"
-    echo "Stats Server: https://${CODESPACE_NAME}-8001.app.github.dev"
+    echo "🔓 DEV Servers (No Authentication):"
+    echo "   Math Server:  https://${CODESPACE_NAME}-8000.app.github.dev"
+    echo "   Stats Server: https://${CODESPACE_NAME}-8001.app.github.dev"
+    echo "   Visibility:   Private (use 'gh codespace ports forward' for access)"
     echo ""
-    echo "🌐 Servers are publicly accessible via these URLs"
+    echo "🔐 PROD Servers (Authentication Required):"
+    echo "   Math Server:  https://${CODESPACE_NAME}-9000.app.github.dev"
+    echo "   Stats Server: https://${CODESPACE_NAME}-9001.app.github.dev"
+    echo "   Visibility:   Public"
+    echo "   Auth Header:  Authorization: Bearer $API_KEY"
+    echo ""
+    echo "🌐 Codespace Environment Detected"
 else
-    echo "Math Server:  http://localhost:8000"
-    echo "Stats Server: http://localhost:8001"
+    echo "🔓 DEV Servers (No Authentication):"
+    echo "   Math Server:  http://localhost:8000"
+    echo "   Stats Server: http://localhost:8001"
+    echo ""
+    echo "🔐 PROD Servers (Authentication Required):"
+    echo "   Math Server:  http://localhost:9000"
+    echo "   Stats Server: http://localhost:9001"
+    echo "   Auth Header:  Authorization: Bearer $API_KEY"
     echo ""
     echo "ℹ️  Running in local environment (not Codespaces)"
 fi
@@ -121,12 +193,25 @@ echo "  📋 Additional Information                "
 echo "============================================"
 echo ""
 echo "Server logs:"
-echo "  - Math Server:  /tmp/math_server.log"
-echo "  - Stats Server: /tmp/stats_server.log"
+echo "  DEV:"
+echo "    - Math Server:  /tmp/math_server_dev.log"
+echo "    - Stats Server: /tmp/stats_server_dev.log"
+echo "  PROD:"
+echo "    - Math Server:  /tmp/math_server_prod.log"
+echo "    - Stats Server: /tmp/stats_server_prod.log"
 echo ""
 echo "View logs with:"
-echo "  tail -f /tmp/math_server.log"
-echo "  tail -f /tmp/stats_server.log"
+echo "  tail -f /tmp/math_server_dev.log"
+echo "  tail -f /tmp/stats_server_dev.log"
+echo "  tail -f /tmp/math_server_prod.log"
+echo "  tail -f /tmp/stats_server_prod.log"
+echo ""
+echo "Test authentication:"
+echo "  # Without auth (should fail on prod):"
+echo "  curl https://${CODESPACE_NAME:-localhost}-9000.app.github.dev/health"
+echo ""
+echo "  # With auth (should succeed on prod):"
+echo "  curl -H \"Authorization: Bearer $API_KEY\" https://${CODESPACE_NAME:-localhost}-9000.app.github.dev/health"
 echo ""
 echo "✅ Startup complete!"
 echo "============================================"
