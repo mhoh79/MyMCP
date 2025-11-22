@@ -70,6 +70,182 @@ Dedicated statistical analysis tools:
 - **Type Safe**: Complete type hints throughout the codebase
 - **MCP Compliant**: Implements the Model Context Protocol specification using stdio and HTTP transports
 
+## 🌐 HTTP/HTTPS Transport
+
+The MCP servers support **dual transport modes**, allowing flexibility in how clients connect:
+
+### Transport Modes
+
+#### 📟 stdio Mode (Default)
+- **Use Case**: Claude Desktop, local MCP clients
+- **Transport**: Standard input/output (stdin/stdout)
+- **Protocol**: JSON-RPC 2.0 over MCP
+- **Best For**: Desktop applications, CLI tools, direct process communication
+
+#### 🌍 HTTP Mode
+- **Use Case**: Web clients, remote connections, GitHub Codespaces, browser-based applications
+- **Transport**: HTTP/HTTPS with Server-Sent Events (SSE)
+- **Protocol**: JSON-RPC 2.0 over HTTP + SSE for streaming
+- **Best For**: Remote access, cloud deployments, web applications, Codespaces
+
+### Architecture Diagram
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    MCP Server (Dual Mode)                       │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  ┌────────────────────────┐      ┌─────────────────────────┐   │
+│  │   stdio Transport      │      │   HTTP Transport        │   │
+│  │                        │      │                         │   │
+│  │  • stdin/stdout        │      │  • FastAPI Framework    │   │
+│  │  • JSON-RPC 2.0        │      │  • REST Endpoints       │   │
+│  │  • Direct process      │      │  • Server-Sent Events   │   │
+│  │    communication       │      │  • JSON-RPC over HTTP   │   │
+│  │                        │      │                         │   │
+│  │  Clients:              │      │  Endpoints:             │   │
+│  │  • Claude Desktop      │      │  • POST /messages       │   │
+│  │  • MCP Inspector       │      │  • GET  /sse            │   │
+│  │  • CLI tools           │      │  • GET  /health         │   │
+│  │                        │      │  • GET  /ready          │   │
+│  │                        │      │  • GET  /metrics        │   │
+│  │                        │      │                         │   │
+│  │                        │      │  Clients:               │   │
+│  │                        │      │  • Web browsers         │   │
+│  │                        │      │  • HTTP clients         │   │
+│  │                        │      │  • GitHub Codespaces    │   │
+│  │                        │      │  • Remote applications  │   │
+│  └────────────────────────┘      └─────────────────────────┘   │
+│                                                                 │
+│              ┌────────────────────────────────┐                 │
+│              │   MCP Tools Layer (24 tools)   │                 │
+│              │   • Math calculations          │                 │
+│              │   • Statistical analysis       │                 │
+│              │   • Text processing            │                 │
+│              │   • Unit conversions           │                 │
+│              └────────────────────────────────┘                 │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### HTTP Endpoints Reference
+
+#### POST `/messages`
+**Purpose**: Main JSON-RPC 2.0 endpoint for tool invocation
+
+**Methods Supported**:
+- `initialize` - Initialize MCP connection
+- `tools/list` - List available tools
+- `tools/call` - Execute a specific tool
+
+**Request Format**:
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "tools/call",
+  "params": {
+    "name": "fibonacci",
+    "arguments": {"n": 10}
+  },
+  "id": 1
+}
+```
+
+**Response Format**:
+```json
+{
+  "jsonrpc": "2.0",
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "Fibonacci number at position 10: 55"
+      }
+    ],
+    "isError": false
+  },
+  "id": 1
+}
+```
+
+#### GET `/sse`
+**Purpose**: Server-Sent Events stream for server-to-client notifications
+
+**Features**:
+- Real-time event streaming
+- Automatic keepalive (every 30 seconds)
+- Connection status notifications
+
+**Events**:
+- `connected` - Initial connection established
+- `ping` - Keepalive heartbeat
+
+#### GET `/health`
+**Purpose**: Basic liveness check
+
+**Response**:
+```json
+{
+  "status": "ok",
+  "server": "math-server",
+  "uptime_seconds": 123.45,
+  "timestamp": "2025-11-22T10:30:00Z"
+}
+```
+
+#### GET `/ready`
+**Purpose**: Readiness check for load balancers
+
+**Response (Ready)**:
+```json
+{
+  "status": "ready",
+  "mcp_initialized": true,
+  "tools_count": 24
+}
+```
+
+**Response (Not Ready)**: HTTP 503
+
+#### GET `/metrics`
+**Purpose**: Operational metrics for monitoring
+
+**Response**:
+```json
+{
+  "total_requests": 1234,
+  "active_connections": 5,
+  "tools_available": 24,
+  "uptime_seconds": 3600.00,
+  "requests_per_minute": 20.50
+}
+```
+
+### Starting Servers in HTTP Mode
+
+**Quick Start** (both servers):
+```bash
+# Linux/Mac
+./start-http-servers.sh start
+
+# Windows
+.\start-http-servers.ps1
+```
+
+**Individual Servers**:
+```bash
+# Math server on port 8000
+python src/math_server/server.py --transport http --port 8000
+
+# Stats server on port 8001
+python src/stats_server/server.py --transport http --port 8001
+```
+
+**With Configuration**:
+```bash
+python src/math_server/server.py --transport http --config config.yaml
+```
+
 ## 📋 Prerequisites
 
 ### For Local Development
@@ -105,7 +281,39 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 2. Configuration (Optional)
+### 2. Quick Start - HTTP Mode
+
+Get started quickly with HTTP transport for web clients and remote access:
+
+```bash
+# 1. Copy example config
+# Option A: Manual copy
+cp config.example.yaml config.yaml
+# Option B: Use launcher (will auto-create if missing)
+
+# 2. Start both servers in HTTP mode
+./start-http-servers.sh start
+
+# 3. Test connection
+curl http://localhost:8000/health
+
+# Expected response:
+# {"status":"ok","server":"math-server","uptime_seconds":1.23,"timestamp":"..."}
+```
+
+**What you get**:
+- Math server running on `http://localhost:8000`
+- Stats server running on `http://localhost:8001`
+- REST API with JSON-RPC 2.0 protocol
+- Health checks, metrics, and SSE streaming
+- Ready for HTTP clients, web apps, and Codespaces
+
+**Next steps**:
+- Test the API: See [Client Connection Examples](#-client-connection-examples)
+- Configure security: See [Configuration Reference](#4-configuration-reference)
+- Deploy to Codespaces: See [GitHub Codespaces Setup](#-github-codespaces-setup)
+
+### 3. Configuration (Optional)
 
 The servers support YAML-based configuration with environment variable overrides. By default, servers run with sensible defaults, but you can customize settings using a config file.
 
@@ -173,7 +381,7 @@ MCP_LOG_LEVEL=DEBUG python src/stats_server/server.py --config config.yaml
 python src/math_server/server.py
 ```
 
-### 3. Security Configuration (Optional)
+### 4. Security Configuration (Optional)
 
 The servers include comprehensive security features that can be enabled via configuration. See [SECURITY.md](SECURITY.md) for detailed documentation.
 
@@ -208,7 +416,108 @@ export MCP_RATE_LIMIT_RPM=60
 
 **Important**: Always use strong API keys and HTTPS in production. See [SECURITY.md](SECURITY.md) for best practices.
 
-### 5. Test the Servers
+### 5. Configuration Reference
+
+Complete reference for all configuration options in `config.yaml`:
+
+#### Server Configuration
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `server.math.host` | string | `"0.0.0.0"` | Math server bind address. Use `"0.0.0.0"` for all interfaces, `"127.0.0.1"` for localhost only |
+| `server.math.port` | integer | `8000` | Math server port number (1-65535) |
+| `server.stats.host` | string | `"0.0.0.0"` | Stats server bind address |
+| `server.stats.port` | integer | `8001` | Stats server port number (1-65535) |
+| `server.cors_origins` | array | `["http://localhost:*", "https://*.app.github.dev"]` | Allowed CORS origins. Supports wildcards (`*`) |
+
+**CORS Origins Examples**:
+```yaml
+cors_origins:
+  - "http://localhost:*"              # All localhost ports
+  - "https://*.app.github.dev"        # All GitHub Codespaces
+  - "https://example.com"             # Specific domain
+  - "http://192.168.1.100:3000"      # Specific IP and port
+  - "*"                               # All origins (not recommended for production)
+```
+
+#### Authentication Configuration
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `authentication.enabled` | boolean | `false` | Enable/disable API key authentication |
+| `authentication.api_key` | string | `"your-secret-api-key-here"` | API key for Bearer token authentication (min 16 chars) |
+
+**Authentication Behavior**:
+- **When enabled**: All endpoints except `/health`, `/ready`, and `/metrics` require `Authorization: Bearer <api_key>` header
+- **When disabled**: No authentication required (suitable for development or trusted networks)
+- **Invalid/missing key**: Returns HTTP 401 Unauthorized
+
+**Environment Variable**: `MCP_AUTH_ENABLED`, `MCP_API_KEY`
+
+#### Rate Limiting Configuration
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `rate_limiting.enabled` | boolean | `false` | Enable/disable rate limiting per client IP |
+| `rate_limiting.requests_per_minute` | integer | `60` | Maximum requests per minute per client (1-10000) |
+
+**Rate Limiting Algorithm**: Token bucket
+- Bucket capacity equals `requests_per_minute` (allows bursts)
+- Tokens refill at rate of `requests_per_minute / 60` per second
+- Each request consumes one token
+- Returns HTTP 429 when rate limit exceeded with `Retry-After` header
+
+**Recommended Values**:
+- **Development**: 120 (2 requests/second)
+- **Production**: 60 (1 request/second)
+- **High-traffic**: 300 (5 requests/second)
+
+**Environment Variable**: `MCP_RATE_LIMIT_ENABLED`, `MCP_RATE_LIMIT_RPM`
+
+#### Logging Configuration
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `logging.level` | string | `"INFO"` | Log level: DEBUG, INFO, WARNING, ERROR, CRITICAL |
+
+**Log Level Details**:
+- **DEBUG**: Detailed information for debugging (verbose, includes request/response details)
+- **INFO**: General informational messages (recommended for production)
+- **WARNING**: Warning messages for potentially problematic situations
+- **ERROR**: Error messages for serious problems
+- **CRITICAL**: Critical messages for severe errors
+
+**Environment Variable**: `MCP_LOG_LEVEL`
+
+#### Environment Variable Override Reference
+
+All configuration options can be overridden using environment variables with the `MCP_` prefix:
+
+```bash
+# Server Configuration
+export MCP_MATH_HOST=127.0.0.1
+export MCP_MATH_PORT=9000
+export MCP_STATS_HOST=127.0.0.1
+export MCP_STATS_PORT=9001
+
+# Authentication
+export MCP_AUTH_ENABLED=true
+export MCP_API_KEY=my-secret-key
+
+# Rate Limiting
+export MCP_RATE_LIMIT_ENABLED=true
+export MCP_RATE_LIMIT_RPM=120
+
+# Logging
+export MCP_LOG_LEVEL=DEBUG
+```
+
+**Priority Order**:
+1. Environment variables (highest priority)
+2. Configuration file (`config.yaml`)
+3. Default values (lowest priority)
+
+### 6. Test the Servers
 
 #### Option A: Quick Start with Launcher Scripts (HTTP Mode)
 
@@ -383,7 +692,7 @@ The repository includes pre-configured VS Code launch configurations in `.vscode
 - Verify the file you're editing is in the `src/` directory
 - Try manually restarting the server
 
-### 6. Configure with Claude Desktop
+### 7. Configure with Claude Desktop
 
 Add **both servers** to Claude Desktop's configuration file:
 
@@ -443,7 +752,7 @@ To use a configuration file with Claude Desktop, add the `--config` argument:
 }
 ```
 
-### 5. Restart Claude Desktop
+### 8. Restart Claude Desktop
 
 Completely quit Claude Desktop and restart it. Both servers should now be available with their respective tools.
 
@@ -703,6 +1012,417 @@ The Docker setup works seamlessly in GitHub Codespaces:
 1. Codespaces automatically forwards ports 8000, 8001, 80, 443
 2. Access via Codespaces URL: `https://<codespace-name>-8000.app.github.dev`
 3. No SSL configuration needed (Codespaces handles HTTPS)
+
+## 🚀 GitHub Codespaces Setup
+
+GitHub Codespaces provides a cloud-based development environment with automatic port forwarding, making it easy to run and access the MCP servers remotely.
+
+### Step-by-Step Setup
+
+#### 1. Create a Codespace
+
+1. Navigate to the repository on GitHub
+2. Click the **Code** button (green button)
+3. Select the **Codespaces** tab
+4. Click **Create codespace on main** (or your preferred branch)
+5. Wait for the Codespace to initialize (1-2 minutes)
+
+#### 2. Automatic Setup
+
+The repository includes a `.devcontainer/devcontainer.json` configuration that automatically:
+- Installs Python 3.10+
+- Installs all dependencies from `requirements.txt`
+- Sets up the development environment
+- Configures port forwarding for ports 8000 and 8001
+
+#### 3. Start the Servers
+
+Once the Codespace is ready, open the terminal and start the servers:
+
+```bash
+# Copy example config (if not already done)
+cp config.example.yaml config.yaml
+
+# Start both servers in HTTP mode
+./start-http-servers.sh start
+```
+
+The startup script will display the server URLs.
+
+#### 4. Access Public URLs
+
+GitHub Codespaces automatically creates public URLs for forwarded ports:
+
+**URL Format**: `https://<codespace-name>-<port>.app.github.dev`
+
+Example URLs:
+- Math server: `https://jubilant-space-waddle-5p4v997xqw5h555-8000.app.github.dev`
+- Stats server: `https://jubilant-space-waddle-5p4v997xqw5h555-8001.app.github.dev`
+
+**Finding Your URLs**:
+1. In VS Code, click the **PORTS** tab in the terminal panel
+2. Your forwarded ports (8000, 8001) will be listed with their URLs
+3. Click the globe icon to open in browser or copy the URL
+
+#### 5. Test Connection
+
+Test the health endpoint in your browser or with curl:
+
+```bash
+# Test math server (replace with your actual URL)
+curl https://your-codespace-8000.app.github.dev/health
+
+# Expected response:
+# {"status":"ok","server":"math-server","uptime_seconds":123.45,"timestamp":"..."}
+```
+
+#### 6. Configure MCP Client
+
+Use the Codespaces URLs in your MCP client configuration:
+
+```javascript
+// Example for HTTP-based MCP client
+const mathServerURL = "https://your-codespace-8000.app.github.dev";
+const statsServerURL = "https://your-codespace-8001.app.github.dev";
+```
+
+### Codespaces Features
+
+✅ **Automatic Port Forwarding**: Ports 8000 and 8001 are automatically forwarded  
+✅ **HTTPS by Default**: All Codespaces URLs use HTTPS (no SSL setup needed)  
+✅ **Public or Private**: Set port visibility to public (accessible by anyone) or private (requires GitHub authentication)  
+✅ **Pre-configured Environment**: `.devcontainer` handles all setup automatically  
+✅ **Persistent Storage**: Your work is saved between Codespace sessions  
+✅ **VS Code Integration**: Full IDE experience in the browser or desktop VS Code  
+
+### Port Visibility Settings
+
+By default, forwarded ports in Codespaces are **private** (require GitHub authentication). To make them **public**:
+
+1. Right-click the port in the **PORTS** tab
+2. Select **Port Visibility** → **Public**
+3. The URL will now be accessible without authentication
+
+⚠️ **Security Note**: Only make ports public if needed. Use authentication (`MCP_AUTH_ENABLED=true`) for public ports.
+
+### Codespaces URL Examples
+
+Your Codespace will have a unique name. Here are examples of what the URLs look like:
+
+```
+Math Server:
+https://jubilant-space-waddle-5p4v997xqw5h555-8000.app.github.dev
+
+Stats Server:
+https://jubilant-space-waddle-5p4v997xqw5h555-8001.app.github.dev
+
+Health Check:
+https://jubilant-space-waddle-5p4v997xqw5h555-8000.app.github.dev/health
+
+Metrics:
+https://jubilant-space-waddle-5p4v997xqw5h555-8000.app.github.dev/metrics
+```
+
+### Troubleshooting Codespaces
+
+**Port not forwarding**:
+- Check the **PORTS** tab to see if ports 8000/8001 are listed
+- Manually add port forwarding: Click **Forward a Port** in PORTS tab
+- Verify servers are running: `./start-http-servers.sh status`
+
+**404 Not Found**:
+- Ensure servers are running
+- Check the correct port number in the URL
+- Verify the path (e.g., `/health`, `/messages`)
+
+**Connection refused**:
+- Servers may not be started yet
+- Check logs: `cat logs/math_server.log`
+- Restart servers: `./start-http-servers.sh restart`
+
+**CORS errors**:
+- Add your Codespaces origin to `config.yaml`:
+  ```yaml
+  cors_origins:
+    - "https://*.app.github.dev"
+  ```
+- Restart servers after config change
+
+## 🔌 Client Connection Examples
+
+### Python Client Example
+
+```python
+import httpx
+import asyncio
+import json
+
+async def call_mcp_tool():
+    """Example: Call a tool via HTTP transport"""
+    
+    # Server URL (replace with your actual URL)
+    server_url = "http://localhost:8000"
+    
+    # Optional: Add authentication header
+    headers = {
+        "Content-Type": "application/json",
+        # "Authorization": "Bearer your-api-key"  # If auth is enabled
+    }
+    
+    # JSON-RPC 2.0 request
+    request = {
+        "jsonrpc": "2.0",
+        "method": "tools/call",
+        "params": {
+            "name": "fibonacci",
+            "arguments": {"n": 10}
+        },
+        "id": 1
+    }
+    
+    async with httpx.AsyncClient() as client:
+        # Call the tool
+        response = await client.post(
+            f"{server_url}/messages",
+            json=request,
+            headers=headers
+        )
+        
+        result = response.json()
+        print(f"Result: {result}")
+
+# Run the example
+asyncio.run(call_mcp_tool())
+```
+
+**Expected Output**:
+```json
+{
+  "jsonrpc": "2.0",
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "Fibonacci number at position 10: 55"
+      }
+    ],
+    "isError": false
+  },
+  "id": 1
+}
+```
+
+### JavaScript/Node.js Client Example
+
+**Installation**: `npm install axios`
+
+```javascript
+// Node.js with CommonJS (require)
+const axios = require('axios');
+
+// Or with ES modules (import) - add "type": "module" to package.json
+// import axios from 'axios';
+
+async function callMCPTool() {
+    // Server URL
+    const serverUrl = 'http://localhost:8000';
+    
+    // Optional: Authentication header
+    const headers = {
+        'Content-Type': 'application/json',
+        // 'Authorization': 'Bearer your-api-key'  // If auth is enabled
+    };
+    
+    // JSON-RPC 2.0 request
+    const request = {
+        jsonrpc: '2.0',
+        method: 'tools/call',
+        params: {
+            name: 'is_prime',
+            arguments: { number: 17 }
+        },
+        id: 1
+    };
+    
+    try {
+        const response = await axios.post(
+            `${serverUrl}/messages`,
+            request,
+            { headers }
+        );
+        
+        console.log('Result:', response.data);
+    } catch (error) {
+        console.error('Error:', error.response?.data || error.message);
+    }
+}
+
+callMCPTool();
+```
+
+### cURL Examples
+
+**Health Check**:
+```bash
+curl http://localhost:8000/health
+```
+
+**List Available Tools**:
+```bash
+curl -X POST http://localhost:8000/messages \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "method": "tools/list",
+    "params": {},
+    "id": 1
+  }'
+```
+
+**Call a Tool (without authentication)**:
+```bash
+curl -X POST http://localhost:8000/messages \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "method": "tools/call",
+    "params": {
+      "name": "fibonacci",
+      "arguments": {"n": 10}
+    },
+    "id": 1
+  }'
+```
+
+**Call a Tool (with authentication)**:
+```bash
+curl -X POST http://localhost:8000/messages \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer your-api-key" \
+  -d '{
+    "jsonrpc": "2.0",
+    "method": "tools/call",
+    "params": {
+      "name": "is_prime",
+      "arguments": {"number": 17}
+    },
+    "id": 1
+  }'
+```
+
+**Check Metrics**:
+```bash
+curl http://localhost:8000/metrics
+```
+
+### Server-Sent Events (SSE) Example
+
+**Installation**: `pip install httpx httpx-sse`
+
+```python
+import httpx
+from httpx_sse import connect_sse
+
+async def listen_to_sse():
+    """Example: Listen to SSE stream"""
+    
+    server_url = "http://localhost:8000"
+    headers = {
+        # "Authorization": "Bearer your-api-key"  # If auth is enabled
+    }
+    
+    async with httpx.AsyncClient() as client:
+        async with connect_sse(
+            client, "GET", f"{server_url}/sse", headers=headers
+        ) as event_source:
+            async for event in event_source.aiter_sse():
+                print(f"Event: {event.event}")
+                print(f"Data: {event.data}")
+                print("---")
+
+# Run the example
+import asyncio
+asyncio.run(listen_to_sse())
+```
+
+### Using with Different Languages
+
+**Go**:
+```go
+package main
+
+import (
+    "bytes"
+    "encoding/json"
+    "fmt"
+    "io"
+    "net/http"
+)
+
+func main() {
+    serverURL := "http://localhost:8000"
+    
+    request := map[string]interface{}{
+        "jsonrpc": "2.0",
+        "method":  "tools/call",
+        "params": map[string]interface{}{
+            "name": "fibonacci",
+            "arguments": map[string]interface{}{
+                "n": 10,
+            },
+        },
+        "id": 1,
+    }
+    
+    jsonData, _ := json.Marshal(request)
+    
+    resp, err := http.Post(
+        serverURL+"/messages",
+        "application/json",
+        bytes.NewBuffer(jsonData),
+    )
+    if err != nil {
+        panic(err)
+    }
+    defer resp.Body.Close()
+    
+    body, _ := io.ReadAll(resp.Body)
+    fmt.Println(string(body))
+}
+```
+
+**Rust**:
+```rust
+use reqwest;
+use serde_json::json;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let server_url = "http://localhost:8000";
+    
+    let request = json!({
+        "jsonrpc": "2.0",
+        "method": "tools/call",
+        "params": {
+            "name": "fibonacci",
+            "arguments": {"n": 10}
+        },
+        "id": 1
+    });
+    
+    let client = reqwest::Client::new();
+    let response = client
+        .post(format!("{}/messages", server_url))
+        .json(&request)
+        .send()
+        .await?;
+    
+    let result = response.json::<serde_json::Value>().await?;
+    println!("{}", serde_json::to_string_pretty(&result)?);
+    
+    Ok(())
+}
+```
 
 ## 💡 Usage Examples
 
@@ -1881,6 +2601,636 @@ print(encode_decode("Hello World!", "encode", "url"))    # Output: 'Hello%20Worl
 - **Async Runtime**: Python asyncio for non-blocking I/O
 - **Logging**: Structured logging to stderr (stdout reserved for protocol)
 - **Error Handling**: Try-catch blocks with detailed error messages
+
+## 🔒 Security Best Practices
+
+When deploying MCP servers in production or exposing them over HTTP, follow these security best practices:
+
+### API Key Management
+
+✅ **DO**:
+- Generate strong, random API keys (minimum 32 characters)
+- Use a password manager or key generation tool (e.g., `openssl rand -hex 32`)
+- Store API keys in environment variables, never in code
+- Use different API keys for different environments (dev, staging, production)
+- Rotate API keys regularly (e.g., every 90 days)
+- Use `.gitignore` to prevent committing `config.yaml` with real keys
+
+❌ **DON'T**:
+- Never commit API keys to version control
+- Don't use simple or guessable keys like "password123" or "my-api-key"
+- Don't share API keys in chat, email, or documentation
+- Don't use the same key across multiple services
+- Don't disable authentication in production
+
+**Example - Generate Strong API Key**:
+```bash
+# Linux/Mac
+openssl rand -hex 32
+
+# Python
+python -c "import secrets; print(secrets.token_urlsafe(32))"
+
+# PowerShell (using cryptographically secure random)
+-join ((1..32) | ForEach-Object { "{0:X2}" -f (Get-Random -Minimum 0 -Maximum 256) })
+
+# Alternative: Use Python on Windows for consistency
+python -c "import secrets; print(secrets.token_urlsafe(32))"
+```
+
+### HTTPS in Production
+
+⚠️ **Never use HTTP in production** - always use HTTPS:
+
+- **Development**: HTTP is acceptable for `localhost` or private networks
+- **Production**: Always use HTTPS with valid SSL certificates
+- **Codespaces**: HTTPS is automatic (GitHub handles SSL)
+- **Docker**: Configure nginx with SSL certificates (see Docker section)
+
+**Why HTTPS**:
+- Encrypts API keys in transit (prevents interception)
+- Prevents man-in-the-middle attacks
+- Required for modern web security standards
+- Enables secure CORS from web browsers
+
+### CORS Configuration
+
+Configure CORS origins restrictively to prevent unauthorized cross-origin requests:
+
+```yaml
+# Bad - allows all origins (security risk)
+cors_origins:
+  - "*"
+
+# Good - specific origins only
+cors_origins:
+  - "http://localhost:3000"           # Local development
+  - "https://app.example.com"         # Production app
+  - "https://*.app.github.dev"        # Codespaces only
+```
+
+**CORS Security Rules**:
+1. Never use `"*"` in production
+2. Use specific domains and protocols
+3. Use wildcards sparingly (e.g., `*.app.github.dev` for Codespaces)
+4. Review CORS origins regularly
+5. Remove unused origins
+
+### Rate Limiting
+
+Enable rate limiting to prevent abuse and DoS attacks:
+
+```yaml
+rate_limiting:
+  enabled: true
+  requests_per_minute: 60  # Adjust based on your needs
+```
+
+**Recommended Limits**:
+- **Development**: 120-300 requests/minute (liberal for testing)
+- **Production API**: 60-120 requests/minute (1-2 requests/second)
+- **Public endpoints**: 30-60 requests/minute (more restrictive)
+
+**Monitor `/metrics` endpoint** for unusual activity:
+- Spike in requests from single IP
+- High rate of 401 (authentication failures)
+- Pattern of 429 (rate limit exceeded)
+
+### Network Security
+
+**Firewall Rules**:
+```bash
+# Allow only necessary ports
+sudo ufw allow 22/tcp      # SSH
+sudo ufw allow 443/tcp     # HTTPS
+sudo ufw deny 8000/tcp     # Deny direct access to app ports
+sudo ufw enable
+```
+
+**Bind to Localhost** when not needed remotely:
+```yaml
+server:
+  math:
+    host: "127.0.0.1"  # Localhost only, not accessible remotely
+    port: 8000
+```
+
+**Use Reverse Proxy** (nginx, Caddy) for production:
+- Terminates SSL/TLS
+- Handles rate limiting at network level
+- Provides additional security headers
+- Hides internal server details
+
+### Environment Variables for Production
+
+**Never store secrets in `config.yaml` for production**. Use environment variables:
+
+```bash
+# .env file (never commit to git)
+MCP_AUTH_ENABLED=true
+MCP_API_KEY=your-strong-randomly-generated-api-key-here
+MCP_RATE_LIMIT_ENABLED=true
+MCP_RATE_LIMIT_RPM=60
+MCP_LOG_LEVEL=INFO
+```
+
+**Load environment variables**:
+```bash
+# Linux/Mac
+source .env
+
+# Or use docker-compose with .env file
+docker-compose up -d
+```
+
+### Monitoring and Alerting
+
+Monitor these endpoints for security issues:
+
+1. **`/metrics`** - Track request rates and patterns
+2. **`/health`** - Ensure server is operational
+3. **Server logs** - Watch for authentication failures
+
+**Set up alerts for**:
+- High rate of 401 responses (unauthorized attempts)
+- Unusual spike in requests
+- Server downtime or health check failures
+- High error rates (5xx responses)
+
+### Security Checklist
+
+Before deploying to production:
+
+- [ ] Authentication enabled (`MCP_AUTH_ENABLED=true`)
+- [ ] Strong API key generated and stored securely
+- [ ] HTTPS configured (not HTTP)
+- [ ] CORS origins configured restrictively (no `*`)
+- [ ] Rate limiting enabled with appropriate limits
+- [ ] Firewall rules configured
+- [ ] Environment variables used for secrets (not config file)
+- [ ] Server logs monitored regularly
+- [ ] `.gitignore` includes `config.yaml` and `.env`
+- [ ] API keys documented in password manager
+- [ ] Incident response plan documented
+- [ ] Regular security audits scheduled
+
+### Additional Resources
+
+- [SECURITY.md](SECURITY.md) - Detailed security features documentation
+- [OWASP API Security Top 10](https://owasp.org/www-project-api-security/)
+- [GitHub Security Best Practices](https://docs.github.com/en/code-security)
+
+## 🔧 Troubleshooting
+
+Comprehensive troubleshooting guide for common issues with MCP servers.
+
+### HTTP Transport Issues
+
+#### Connection Refused
+
+**Symptoms**: `curl: (7) Failed to connect to localhost port 8000: Connection refused`
+
+**Solutions**:
+1. **Check if server is running**:
+   ```bash
+   # Check process
+   ./start-http-servers.sh status
+   
+   # Or check ports
+   lsof -i :8000    # Mac/Linux
+   netstat -ano | findstr :8000  # Windows
+   ```
+
+2. **Start the server**:
+   ```bash
+   ./start-http-servers.sh start
+   ```
+
+3. **Check server logs**:
+   ```bash
+   cat logs/math_server.log
+   tail -f logs/math_server.log  # Follow logs in real-time
+   ```
+
+4. **Verify port not in use by another process**:
+   ```bash
+   # Kill process on port 8000 (if needed)
+   # Try graceful shutdown first (SIGTERM)
+   lsof -ti:8000 | xargs kill
+   
+   # Wait 5 seconds for graceful shutdown
+   sleep 5
+   
+   # If process still running, force kill as last resort (SIGKILL)
+   lsof -ti:8000 | xargs kill -9
+   ```
+
+#### CORS Errors in Browser
+
+**Symptoms**: 
+- Browser console shows: `Access to fetch at 'http://localhost:8000' from origin 'http://localhost:3000' has been blocked by CORS policy`
+- HTTP error: `No 'Access-Control-Allow-Origin' header`
+
+**Solutions**:
+
+1. **Add your origin to config.yaml**:
+   ```yaml
+   server:
+     cors_origins:
+       - "http://localhost:3000"
+       - "http://localhost:*"  # All localhost ports
+   ```
+
+2. **For development, allow all localhost ports**:
+   ```yaml
+   cors_origins:
+     - "http://localhost:*"
+     - "http://127.0.0.1:*"
+   ```
+
+3. **Restart server after config change**:
+   ```bash
+   ./start-http-servers.sh restart
+   ```
+
+4. **Verify CORS headers in response**:
+   ```bash
+   curl -i -H "Origin: http://localhost:3000" http://localhost:8000/health
+   # Look for: Access-Control-Allow-Origin: http://localhost:3000
+   ```
+
+#### 401 Unauthorized
+
+**Symptoms**: HTTP 401 response with `{"error": "Invalid or missing API key"}`
+
+**Solutions**:
+
+1. **Check if authentication is enabled**:
+   ```bash
+   # Look in config.yaml
+   grep -A 2 "authentication:" config.yaml
+   ```
+
+2. **Include Authorization header**:
+   ```bash
+   curl -H "Authorization: Bearer your-api-key" \
+        http://localhost:8000/messages \
+        -d '{"jsonrpc":"2.0","method":"tools/list","params":{},"id":1}'
+   ```
+
+3. **Verify API key matches config**:
+   ```bash
+   # Check config file
+   grep "api_key:" config.yaml
+   
+   # Or check environment variable
+   echo $MCP_API_KEY
+   ```
+
+4. **Disable authentication for testing** (development only):
+   ```yaml
+   authentication:
+     enabled: false
+   ```
+
+#### 429 Rate Limit Exceeded
+
+**Symptoms**: HTTP 429 response with `{"error": "Rate limit exceeded"}`
+
+**Solutions**:
+
+1. **Check rate limit settings**:
+   ```yaml
+   rate_limiting:
+     enabled: true
+     requests_per_minute: 60
+   ```
+
+2. **Increase rate limit** (if appropriate):
+   ```yaml
+   rate_limiting:
+     requests_per_minute: 120  # 2 requests/second
+   ```
+
+3. **Wait before retrying**:
+   - Check `Retry-After` header in 429 response
+   - Implement exponential backoff in client
+
+4. **Disable rate limiting for testing** (development only):
+   ```yaml
+   rate_limiting:
+     enabled: false
+   ```
+
+5. **Check metrics for request pattern**:
+   ```bash
+   curl http://localhost:8000/metrics
+   ```
+
+#### SSE Connection Drops
+
+**Symptoms**: Server-Sent Events connection closes unexpectedly
+
+**Solutions**:
+
+1. **Check network stability**:
+   - Wi-Fi connection stable
+   - No firewall blocking persistent connections
+   - Proxy/VPN not interfering
+
+2. **Verify keepalive is working**:
+   - Server sends ping every 30 seconds
+   - Check client receives ping events
+
+3. **Increase client timeout**:
+   ```javascript
+   // JavaScript EventSource
+   const evtSource = new EventSource("http://localhost:8000/sse");
+   evtSource.onerror = (err) => {
+       console.error("EventSource error:", err);
+       // Implement reconnection logic
+   };
+   ```
+
+4. **Check server logs for connection errors**:
+   ```bash
+   grep "SSE" logs/math_server.log
+   ```
+
+### Codespaces Issues
+
+#### Port Not Forwarding
+
+**Solutions**:
+
+1. **Manually forward port**:
+   - Open **PORTS** tab in VS Code terminal
+   - Click **Forward a Port**
+   - Enter port number (8000 or 8001)
+
+2. **Check `.devcontainer/devcontainer.json`**:
+   ```json
+   "forwardPorts": [8000, 8001]
+   ```
+
+3. **Verify servers are running**:
+   ```bash
+   ./start-http-servers.sh status
+   ps aux | grep python
+   ```
+
+#### 404 Not Found on Codespaces URL
+
+**Solutions**:
+
+1. **Verify correct URL format**:
+   ```
+   https://<codespace-name>-8000.app.github.dev/health
+   ```
+
+2. **Check port number in URL matches server port**
+
+3. **Ensure path is correct** (e.g., `/health`, not `/health/`)
+
+4. **Check server is listening on 0.0.0.0**:
+   ```yaml
+   server:
+     math:
+       host: "0.0.0.0"  # Not 127.0.0.1
+   ```
+
+#### Codespaces URL Returns 502 Bad Gateway
+
+**Solutions**:
+
+1. **Server not started yet**:
+   ```bash
+   ./start-http-servers.sh start
+   ```
+
+2. **Server crashed - check logs**:
+   ```bash
+   cat logs/math_server.log
+   ```
+
+3. **Port mismatch - verify configuration**:
+   ```bash
+   grep "port:" config.yaml
+   ```
+
+### stdio Mode Issues (Claude Desktop)
+
+#### Server Not Appearing in Claude
+
+**Solutions**:
+
+1. **Verify config file location**:
+   - **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
+   - **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
+   - **Linux**: `~/.config/Claude/claude_desktop_config.json`
+
+2. **Check JSON syntax**:
+   ```bash
+   # Validate JSON
+   python -m json.tool claude_desktop_config.json
+   ```
+
+3. **Use absolute paths**:
+   ```json
+   {
+     "mcpServers": {
+       "math-server": {
+         "command": "/absolute/path/to/venv/bin/python",
+         "args": ["/absolute/path/to/src/math_server/server.py"]
+       }
+     }
+   }
+   ```
+
+4. **Restart Claude Desktop completely**:
+   - Quit Claude Desktop (not just close window)
+   - On Windows: Check Task Manager and end process if needed
+   - Relaunch Claude Desktop
+
+5. **Check Claude logs**:
+   - **Windows**: `%APPDATA%\Claude\logs\main.log`
+   - Look for MCP-related errors
+
+#### Import Errors
+
+**Symptoms**: `ModuleNotFoundError: No module named 'mcp'`
+
+**Solutions**:
+
+1. **Verify virtual environment activated**:
+   ```bash
+   which python  # Should show venv path
+   ```
+
+2. **Install dependencies**:
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+3. **Use correct Python path in config**:
+   ```bash
+   # Find venv Python
+   which python  # Mac/Linux
+   where python  # Windows
+   ```
+
+### Configuration Issues
+
+#### Config File Not Loaded
+
+**Symptoms**: Server uses default values instead of config.yaml
+
+**Solutions**:
+
+1. **Specify config file explicitly**:
+   ```bash
+   python src/math_server/server.py --config config.yaml
+   ```
+
+2. **Check file exists**:
+   ```bash
+   ls -la config.yaml
+   ```
+
+3. **Verify YAML syntax**:
+   ```bash
+   python -c "import yaml; yaml.safe_load(open('config.yaml'))"
+   ```
+
+4. **Check file permissions**:
+   ```bash
+   chmod 644 config.yaml
+   ```
+
+#### Environment Variables Not Working
+
+**Solutions**:
+
+1. **Verify export syntax**:
+   ```bash
+   export MCP_API_KEY="your-key"
+   echo $MCP_API_KEY  # Should print your key
+   ```
+
+2. **Use correct variable names** (with `MCP_` prefix):
+   ```bash
+   MCP_AUTH_ENABLED=true  # Correct
+   AUTH_ENABLED=true      # Wrong - missing MCP_ prefix
+   ```
+
+3. **Load .env file**:
+   ```bash
+   source .env  # Or use python-dotenv
+   ```
+
+### Performance Issues
+
+#### High Memory Usage
+
+**Solutions**:
+
+1. **Check for large datasets in tool calls**
+2. **Reduce logging level**:
+   ```yaml
+   logging:
+     level: "WARNING"  # Instead of DEBUG
+   ```
+3. **Monitor with metrics**:
+   ```bash
+   curl http://localhost:8000/metrics
+   ```
+
+#### Slow Response Times
+
+**Solutions**:
+
+1. **Check CPU usage**:
+   ```bash
+   top -p $(pgrep -f math_server)
+   ```
+
+2. **Enable hot-reload only in development**:
+   ```bash
+   # Don't use --dev in production
+   python src/math_server/server.py --transport http
+   ```
+
+3. **Consider scaling** (run multiple instances behind load balancer)
+
+### Docker Issues
+
+#### Container Won't Start
+
+**Solutions**:
+
+1. **Check Docker logs**:
+   ```bash
+   docker-compose logs math-server
+   docker-compose logs stats-server
+   ```
+
+2. **Verify ports not in use**:
+   ```bash
+   docker-compose ps
+   lsof -i :8000
+   ```
+
+3. **Rebuild containers**:
+   ```bash
+   docker-compose down
+   docker-compose up --build
+   ```
+
+#### Can't Access Docker Services
+
+**Solutions**:
+
+1. **Check container is running**:
+   ```bash
+   docker-compose ps
+   ```
+
+2. **Test from inside container**:
+   ```bash
+   docker exec mcp-math-server curl http://localhost:8000/health
+   ```
+
+3. **Check network configuration**:
+   ```bash
+   docker network inspect mymcp_mcp-network
+   ```
+
+### Getting Help
+
+If you're still experiencing issues:
+
+1. **Check logs** (most important):
+   ```bash
+   cat logs/math_server.log
+   cat logs/stats_server.log
+   ```
+
+2. **Enable DEBUG logging**:
+   ```yaml
+   logging:
+     level: "DEBUG"
+   ```
+
+3. **Test with curl** (isolate client issues):
+   ```bash
+   curl -v http://localhost:8000/health
+   ```
+
+4. **Create GitHub issue** with:
+   - Exact error message
+   - Log file contents (remove API keys!)
+   - Steps to reproduce
+   - Environment details (OS, Python version)
 
 ## 🔍 Debugging
 
