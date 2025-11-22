@@ -94,7 +94,7 @@ if [ "$MATH_READY" = false ] && [ "$STATS_READY" = false ]; then
     exit 1
 fi
 
-# Step 5: Display public URLs
+# Step 6: Display public URLs
 echo ""
 echo "============================================"
 echo "  📡 Server URLs                           "
