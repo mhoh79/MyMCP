@@ -10,6 +10,7 @@ services:
       - MCP_AUTH_ENABLED=true
       - MCP_API_KEY=${MCP_API_KEY}
       - MCP_RATE_LIMIT_ENABLED=true
+      - HEALTHCHECK_PORT=8000
     command: python src/math_server/server.py --transport http --host 0.0.0.0 --port 8000 --config config.yaml
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
@@ -32,6 +33,7 @@ services:
       - MCP_AUTH_ENABLED=true
       - MCP_API_KEY=${MCP_API_KEY}
       - MCP_RATE_LIMIT_ENABLED=true
+      - HEALTHCHECK_PORT=8001
     command: python src/stats_server/server.py --transport http --host 0.0.0.0 --port 8001 --config config.yaml
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
