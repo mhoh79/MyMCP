@@ -64,9 +64,11 @@ Dedicated statistical analysis tools:
 - **High Performance**: Optimized algorithms (Euclidean algorithm, Sieve of Eratosthenes, efficient combinatorics, memoization)
 - **Robust Validation**: Comprehensive error handling and input validation with appropriate ranges
 - **Production Ready**: Full logging, proper error messages, and graceful shutdown
+- **Security Features**: API key authentication, rate limiting, CORS support (see [SECURITY.md](SECURITY.md))
+- **Configurable**: YAML-based configuration with environment variable overrides
 - **Well Documented**: Extensive code annotations and inline documentation for learning
 - **Type Safe**: Complete type hints throughout the codebase
-- **MCP Compliant**: Implements the Model Context Protocol specification using stdio transport
+- **MCP Compliant**: Implements the Model Context Protocol specification using stdio and HTTP transports
 
 ## 📋 Prerequisites
 
@@ -171,7 +173,42 @@ MCP_LOG_LEVEL=DEBUG python src/stats_server/server.py --config config.yaml
 python src/math_server/server.py
 ```
 
-### 3. Test the Servers
+### 3. Security Configuration (Optional)
+
+The servers include comprehensive security features that can be enabled via configuration. See [SECURITY.md](SECURITY.md) for detailed documentation.
+
+#### Quick Security Setup
+
+For production deployments with authentication and rate limiting:
+
+```yaml
+authentication:
+  enabled: true
+  api_key: "your-secure-api-key-with-at-least-16-characters"
+
+rate_limiting:
+  enabled: true
+  requests_per_minute: 60  # Adjust based on your needs
+```
+
+Or via environment variables:
+
+```bash
+export MCP_AUTH_ENABLED=true
+export MCP_API_KEY="your-secure-api-key-with-at-least-16-characters"
+export MCP_RATE_LIMIT_ENABLED=true
+export MCP_RATE_LIMIT_RPM=60
+```
+
+**Security Features Include**:
+- 🔐 **API Key Authentication**: Bearer token validation
+- 🚦 **Rate Limiting**: Token bucket algorithm per client IP
+- 🌐 **CORS Support**: Configurable cross-origin access
+- 📝 **Request Logging**: Comprehensive request tracking
+
+**Important**: Always use strong API keys and HTTPS in production. See [SECURITY.md](SECURITY.md) for best practices.
+
+### 5. Test the Servers
 
 Run each server directly to verify they work:
 
@@ -195,7 +232,7 @@ To validate your configuration:
 python test_config.py
 ```
 
-### 3. Configure with Claude Desktop
+### 6. Configure with Claude Desktop
 
 Add **both servers** to Claude Desktop's configuration file:
 
