@@ -4846,7 +4846,7 @@ async def handle_encode_decode(arguments: Any) -> CallToolResult:
         )
 
 
-async def run_http_server(host: str = "0.0.0.0", port: int = 8000, config_path: Optional[str] = None):
+async def run_http_server(host: str = "0.0.0.0", port: int = 8000, config_path: Optional[str] = None, dev_mode: bool = False):
     """
     Run the server using HTTP/SSE transport.
     
@@ -4861,6 +4861,7 @@ async def run_http_server(host: str = "0.0.0.0", port: int = 8000, config_path: 
         host: Host to bind to (default: 0.0.0.0)
         port: Port to bind to (default: 8000)
         config_path: Optional path to configuration file
+        dev_mode: Enable development mode with hot-reload (default: False)
     """
     # Load configuration
     try:
@@ -5108,6 +5109,25 @@ async def run_http_server(host: str = "0.0.0.0", port: int = 8000, config_path: 
     signal.signal(signal.SIGINT, signal_handler)
     
     # Run the FastAPI server
+    if dev_mode:
+        # Development mode: use uvicorn.run with reload
+        # Note: In dev mode, we need to use uvicorn.run directly which blocks
+        logger.info("🔥 Development mode enabled - hot-reload active")
+        logger.info(f"Watching directory: src/")
+        logger.info(f"Server will restart automatically on code changes")
+        
+        # Prepare uvicorn config for dev mode
+        uvicorn.run(
+            fastapi_app,
+            host=host,
+            port=port,
+            reload=True,
+            reload_dirs=["src"],
+            log_level="debug"
+        )
+        return  # uvicorn.run blocks, so we return after it exits
+    
+    # Production mode: normal async server
     config_uvicorn = uvicorn.Config(
         fastapi_app,
         host=host,
@@ -5221,6 +5241,9 @@ Examples:
   # Run in HTTP mode
   python server.py --transport http --host 0.0.0.0 --port 8000
   
+  # Run in HTTP mode with hot-reload (development)
+  python server.py --transport http --host 0.0.0.0 --port 8000 --dev
+  
   # Run with custom configuration file
   python server.py --config /path/to/config.yaml
   
@@ -5265,11 +5288,18 @@ Environment Variables:
         default=8000,
         help="Port to bind to in HTTP mode (default: 8000)"
     )
+    parser.add_argument(
+        "--dev",
+        action="store_true",
+        help="Enable development mode with hot-reload (HTTP mode only)"
+    )
     
     args = parser.parse_args()
     
     # Run the appropriate server mode
     if args.transport == "http":
-        asyncio.run(run_http_server(args.host, args.port, args.config))
+        asyncio.run(run_http_server(args.host, args.port, args.config, args.dev))
     else:
+        if args.dev:
+            logger.warning("--dev flag is only supported in HTTP mode, ignoring")
         asyncio.run(run_stdio_server(args.config))

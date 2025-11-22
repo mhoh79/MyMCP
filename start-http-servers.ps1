@@ -17,9 +17,16 @@
 .PARAMETER Restart
     Restart servers (stop if running, then start)
     
+.PARAMETER Dev
+    Enable development mode with hot-reload (servers restart on code changes)
+    
 .EXAMPLE
     .\start-http-servers.ps1
     Start both MCP servers
+    
+.EXAMPLE
+    .\start-http-servers.ps1 -Dev
+    Start both MCP servers with hot-reload enabled
     
 .EXAMPLE
     .\start-http-servers.ps1 -Stop
@@ -30,14 +37,15 @@
     Check server status
     
 .EXAMPLE
-    .\start-http-servers.ps1 -Restart
-    Restart servers
+    .\start-http-servers.ps1 -Restart -Dev
+    Restart servers with hot-reload enabled
 #>
 
 param(
     [switch]$Stop,
     [switch]$Status,
-    [switch]$Restart
+    [switch]$Restart,
+    [switch]$Dev
 )
 
 # Configuration
@@ -47,6 +55,7 @@ $ConfigFile = "config.yaml"
 $ConfigExample = "config.example.yaml"
 $PidsFile = ".pids"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$DevMode = $Dev.IsPresent
 
 # Function to print colored output
 function Write-Status {
@@ -161,7 +170,13 @@ function Write-PidsFile {
 
 # Function to start servers
 function Start-Servers {
-    Write-Host "🚀 Starting MCP Servers in HTTP mode..." -ForegroundColor Blue
+    if ($DevMode) {
+        Write-Host "🚀 Starting MCP Servers in HTTP mode with hot-reload..." -ForegroundColor Blue
+        Write-Warning-Custom "Development mode enabled - servers will restart on code changes"
+    }
+    else {
+        Write-Host "🚀 Starting MCP Servers in HTTP mode..." -ForegroundColor Blue
+    }
     Write-Host ""
 
     # Change to script directory
@@ -246,9 +261,15 @@ function Start-Servers {
     Write-Host ""
     Write-Info "Starting Math Server on port $MathPort..."
     
+    # Build argument list with optional --dev flag
+    $mathArgs = @("src/math_server/server.py", "--transport", "http", "--host", "0.0.0.0", "--port", $MathPort, "--config", $ConfigFile)
+    if ($DevMode) {
+        $mathArgs += "--dev"
+    }
+    
     $startProcessParams = @{
         FilePath = $pythonCmd
-        ArgumentList = "src/math_server/server.py", "--transport", "http", "--host", "0.0.0.0", "--port", $MathPort, "--config", $ConfigFile
+        ArgumentList = $mathArgs
         RedirectStandardOutput = "logs/math_server.log"
         RedirectStandardError = "logs/math_server_error.log"
         PassThru = $true
@@ -276,9 +297,15 @@ function Start-Servers {
     Write-Host ""
     Write-Info "Starting Stats Server on port $StatsPort..."
     
+    # Build argument list with optional --dev flag
+    $statsArgs = @("src/stats_server/server.py", "--transport", "http", "--host", "0.0.0.0", "--port", $StatsPort, "--config", $ConfigFile)
+    if ($DevMode) {
+        $statsArgs += "--dev"
+    }
+    
     $startProcessParams = @{
         FilePath = $pythonCmd
-        ArgumentList = "src/stats_server/server.py", "--transport", "http", "--host", "0.0.0.0", "--port", $StatsPort, "--config", $ConfigFile
+        ArgumentList = $statsArgs
         RedirectStandardOutput = "logs/stats_server.log"
         RedirectStandardError = "logs/stats_server_error.log"
         PassThru = $true

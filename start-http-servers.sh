@@ -20,6 +20,7 @@ CONFIG_FILE="config.yaml"
 CONFIG_EXAMPLE="config.example.yaml"
 PIDS_FILE=".pids"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DEV_MODE=false
 
 # Function to print colored output
 print_status() {
@@ -79,7 +80,12 @@ get_codespace_name() {
 
 # Function to start servers
 start_servers() {
-    echo -e "${BLUE}🚀 Starting MCP Servers in HTTP mode...${NC}"
+    if [ "$DEV_MODE" = true ]; then
+        echo -e "${BLUE}🚀 Starting MCP Servers in HTTP mode with hot-reload...${NC}"
+        print_warning "Development mode enabled - servers will restart on code changes"
+    else
+        echo -e "${BLUE}🚀 Starting MCP Servers in HTTP mode...${NC}"
+    fi
     echo ""
 
     # Change to script directory
@@ -153,7 +159,14 @@ start_servers() {
     # Start math_server
     echo ""
     print_info "Starting Math Server on port $MATH_PORT..."
-    nohup python3 src/math_server/server.py --transport http --host 0.0.0.0 --port $MATH_PORT --config "$CONFIG_FILE" > logs/math_server.log 2>&1 &
+    
+    # Build command with optional --dev flag
+    MATH_CMD="python3 src/math_server/server.py --transport http --host 0.0.0.0 --port $MATH_PORT --config \"$CONFIG_FILE\""
+    if [ "$DEV_MODE" = true ]; then
+        MATH_CMD="$MATH_CMD --dev"
+    fi
+    
+    nohup bash -c "$MATH_CMD" > logs/math_server.log 2>&1 &
     MATH_PID=$!
     sleep 2
 
@@ -168,7 +181,14 @@ start_servers() {
     # Start stats_server
     echo ""
     print_info "Starting Stats Server on port $STATS_PORT..."
-    nohup python3 src/stats_server/server.py --transport http --host 0.0.0.0 --port $STATS_PORT --config "$CONFIG_FILE" > logs/stats_server.log 2>&1 &
+    
+    # Build command with optional --dev flag
+    STATS_CMD="python3 src/stats_server/server.py --transport http --host 0.0.0.0 --port $STATS_PORT --config \"$CONFIG_FILE\""
+    if [ "$DEV_MODE" = true ]; then
+        STATS_CMD="$STATS_CMD --dev"
+    fi
+    
+    nohup bash -c "$STATS_CMD" > logs/stats_server.log 2>&1 &
     STATS_PID=$!
     sleep 2
 
@@ -299,8 +319,30 @@ check_status() {
     echo ""
 }
 
+# Parse command-line arguments
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --dev)
+            DEV_MODE=true
+            shift
+            ;;
+        start|stop|status|restart)
+            COMMAND="$1"
+            shift
+            ;;
+        *)
+            echo "Unknown option: $1"
+            echo "Usage: $0 [start|stop|status|restart] [--dev]"
+            exit 1
+            ;;
+    esac
+done
+
+# Default command is start if not specified
+COMMAND="${COMMAND:-start}"
+
 # Main script logic
-case "${1:-start}" in
+case "$COMMAND" in
     start)
         start_servers
         ;;
@@ -318,13 +360,16 @@ case "${1:-start}" in
         start_servers
         ;;
     *)
-        echo "Usage: $0 {start|stop|status|restart}"
+        echo "Usage: $0 {start|stop|status|restart} [--dev]"
         echo ""
         echo "Commands:"
         echo "  start    - Start both MCP servers in HTTP mode (default)"
         echo "  stop     - Stop running servers"
         echo "  status   - Check server status"
         echo "  restart  - Restart servers"
+        echo ""
+        echo "Options:"
+        echo "  --dev    - Enable development mode with hot-reload"
         exit 1
         ;;
 esac
