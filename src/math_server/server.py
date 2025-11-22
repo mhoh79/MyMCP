@@ -47,6 +47,7 @@ if str(_parent_dir) not in sys.path:
     sys.path.insert(0, str(_parent_dir))
 
 from config import load_config, Config
+from middleware import setup_middleware
 
 # Configure logging to stderr (stdout is reserved for MCP protocol messages)
 # Note: Log level will be updated based on config in main()
@@ -4883,6 +4884,9 @@ async def run_http_server(host: str = "0.0.0.0", port: int = 8000, config_path: 
     
     # Create FastAPI app
     fastapi_app = FastAPI(title="Math Calculator MCP Server", version="1.0.0")
+    
+    # Setup middleware (CORS, authentication, rate limiting, logging)
+    setup_middleware(fastapi_app, config)
     
     # Initialize server state for monitoring
     server_state = ServerState()
