@@ -2,6 +2,60 @@
 
 A complete Model Context Protocol (MCP) server implementation in Python that provides mathematical calculation and statistical analysis tools for AI assistants like Claude Desktop and other MCP-compatible clients.
 
+## 📚 Documentation
+
+- **[Architecture Guide](docs/ARCHITECTURE.md)** - System design, patterns, and implementation details
+- **[Adding Custom Servers](docs/ADDING_CUSTOM_SERVERS.md)** - Step-by-step guide for building your own MCP servers
+- **[Security Guidelines](SECURITY.md)** - Security best practices and configuration
+- **[Core Framework](src/core/README.md)** - BaseMCPServer API reference
+- **[Custom Servers Guide](src/custom/README.md)** - Quick reference for custom development
+
+## 📁 Repository Structure
+
+```
+MyMCP/
+├── src/
+│   ├── core/                    # 🔧 Core Framework
+│   │   ├── mcp_server.py        # BaseMCPServer - foundation for all servers
+│   │   ├── tool_registry.py     # Tool management and registration
+│   │   └── server_state.py      # Server metrics and state tracking
+│   │
+│   ├── builtin/                 # 🏢 Built-in Production Servers
+│   │   ├── math_server/         # Mathematical calculations (25+ tools)
+│   │   └── stats_server/        # Statistical analysis (32+ tools)
+│   │
+│   ├── custom/                  # 🎨 Your Custom Servers
+│   │   └── README.md            # Development guide
+│   │
+│   ├── templates/               # 📋 Server Templates
+│   │   └── skeleton_server/     # Minimal working template
+│   │
+│   ├── config.py                # Configuration loader
+│   └── middleware.py            # HTTP middleware components
+│
+├── docs/                        # 📖 Documentation
+│   ├── ARCHITECTURE.md          # System architecture
+│   └── ADDING_CUSTOM_SERVERS.md # Developer guide
+│
+├── tests/                       # 🧪 Test Suite
+│   ├── core/                    # Framework tests
+│   ├── builtin/                 # Built-in server tests
+│   └── templates/               # Template tests
+│
+├── config.yaml                  # Default configuration
+├── requirements.txt             # Python dependencies
+└── README.md                    # This file
+```
+
+### Directory Purpose
+
+- **`src/core/`**: Reusable framework that all servers inherit from - provides transport handling, tool registry, and monitoring
+- **`src/builtin/`**: Production-ready servers maintained by the project - math and statistics
+- **`src/custom/`**: Your custom servers (gitignored) - build your own MCP servers here
+- **`src/templates/`**: Starting templates for new servers - copy and customize
+- **`docs/`**: Comprehensive documentation - architecture, guides, and best practices
+- **`tests/`**: Test suite - ensures quality and correctness
+
 ## 🏗️ Architecture
 
 This repository contains **two specialized MCP servers**:
@@ -5027,6 +5081,372 @@ Example verifications:
 
 - Request: "Transform 'Hello World' to camelCase"
 - Expected: `helloWorld`
+
+## 🔄 Migration Guide
+
+### From Previous Architecture (Pre-Phase 8)
+
+If you have older code or were using MyMCP before Phase 8, here's how to migrate:
+
+#### What Changed
+
+1. **Repository Structure**: Code reorganized into `core/`, `builtin/`, `custom/`, and `templates/`
+2. **Base Class**: New `BaseMCPServer` provides common functionality
+3. **Tool Registry**: Centralized tool management via `ToolRegistry`
+4. **Configuration**: Improved YAML-based config with environment overrides
+
+#### Migration Steps
+
+**For Custom Servers:**
+
+1. **Update imports:**
+   ```python
+   # Old
+   from math_server import MathServer
+   
+   # New
+   from src.core import BaseMCPServer
+   ```
+
+2. **Inherit from BaseMCPServer:**
+   ```python
+   # Old
+   class MyServer:
+       def __init__(self):
+           self.tools = []
+   
+   # New
+   class MyServer(BaseMCPServer):
+       def register_tools(self) -> None:
+           # Register tools here
+           pass
+       
+       def get_server_name(self) -> str:
+           return "my-server"
+       
+       def get_server_version(self) -> str:
+           return "1.0.0"
+   ```
+
+3. **Move to custom directory:**
+   ```bash
+   # Move your server to the new location
+   mv my_server src/custom/my_server
+   ```
+
+4. **Update tool registration:**
+   ```python
+   # Old
+   self.tools.append({"name": "my_tool", "handler": my_handler})
+   
+   # New
+   tool = Tool(name="my_tool", description="...", inputSchema={...})
+   self.tool_registry.register_tool(tool, self.handle_my_tool)
+   ```
+
+5. **Update entry point:**
+   ```python
+   # Old
+   if __name__ == "__main__":
+       server = MyServer()
+       server.start()
+   
+   # New
+   if __name__ == "__main__":
+       parser = BaseMCPServer.create_argument_parser(
+           description="My Server"
+       )
+       args = parser.parse_args()
+       server = MyServer(config_path=args.config)
+       server.run(
+           transport=args.transport,
+           host=args.host,
+           port=args.port,
+           dev_mode=args.dev
+       )
+   ```
+
+**For Configuration:**
+
+1. **Update config structure:**
+   ```yaml
+   # Old config format
+   server_name: "my-server"
+   port: 8000
+   
+   # New config format
+   server:
+     name: "my-server"
+     version: "1.0.0"
+   
+   http:
+     host: "0.0.0.0"
+     port: 8000
+   ```
+
+2. **Use environment variables:**
+   ```bash
+   # Override config with environment variables
+   export MCP_LOG_LEVEL=DEBUG
+   export MCP_PORT=8080
+   ```
+
+**Benefits of Migration:**
+
+- ✅ Less boilerplate code
+- ✅ Consistent structure across servers
+- ✅ Built-in health checks and metrics
+- ✅ Automatic transport handling
+- ✅ Better error handling
+- ✅ Easier testing
+
+### Need Help?
+
+- Check [ARCHITECTURE.md](docs/ARCHITECTURE.md) for design details
+- Review [ADDING_CUSTOM_SERVERS.md](docs/ADDING_CUSTOM_SERVERS.md) for step-by-step guide
+- Compare your code with `src/templates/skeleton_server/`
+- Look at examples in `src/builtin/math_server/` and `src/builtin/stats_server/`
+
+## 🔧 Troubleshooting
+
+### Common Issues and Solutions
+
+#### Server Won't Start
+
+**Problem:** `ModuleNotFoundError: No module named 'mcp'`
+
+**Solution:**
+```bash
+# Ensure you're in the project root
+cd /path/to/MyMCP
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Verify installation
+python -c "import mcp; print(mcp.__version__)"
+```
+
+**Problem:** `Address already in use` (HTTP mode)
+
+**Solution:**
+```bash
+# Check what's using the port
+lsof -i :8000  # macOS/Linux
+netstat -ano | findstr :8000  # Windows
+
+# Kill the process or use a different port
+python -m src.builtin.math_server --transport http --port 8002
+```
+
+#### Claude Desktop Integration Issues
+
+**Problem:** Server not showing in Claude Desktop
+
+**Solution:**
+1. Verify config.json syntax:
+   ```bash
+   # Validate JSON
+   python -m json.tool ~/.config/Claude/config.json
+   ```
+
+2. Check paths are absolute:
+   ```json
+   {
+     "mcpServers": {
+       "math-server": {
+         "command": "python",
+         "args": ["-m", "src.builtin.math_server.server"],
+         "cwd": "/absolute/path/to/MyMCP"  ← Must be absolute!
+       }
+     }
+   }
+   ```
+
+3. Restart Claude Desktop completely:
+   - **macOS**: Cmd+Q to quit, then reopen
+   - **Windows**: Exit from system tray, then reopen
+   - **Linux**: Kill process and restart
+
+4. Check Claude Desktop logs:
+   - **macOS**: `~/Library/Logs/Claude/`
+   - **Windows**: `%APPDATA%\Claude\logs\`
+   - **Linux**: `~/.config/Claude/logs/`
+
+**Problem:** Tools not appearing
+
+**Solution:**
+```python
+# Ensure tools are registered in register_tools()
+def register_tools(self):
+    # Make sure this is called and tools are registered
+    self.tool_registry.register_tool(my_tool, self.handle_my_tool)
+    
+# Verify tool count
+print(f"Registered tools: {self.tool_registry.count()}")
+```
+
+#### HTTP Mode Issues
+
+**Problem:** Can't connect to HTTP server
+
+**Solution:**
+```bash
+# Test server is running
+curl http://localhost:8000/health
+
+# If timeout, check firewall
+# If connection refused, verify server started
+# Check server logs for errors
+
+# Test with verbose curl
+curl -v http://localhost:8000/health
+```
+
+**Problem:** CORS errors in browser
+
+**Solution:**
+```yaml
+# config.yaml - Add your origin
+http:
+  enable_cors: true
+  allowed_origins:
+    - "http://localhost:3000"
+    - "https://your-domain.com"
+```
+
+#### Tool Execution Errors
+
+**Problem:** Tool returns error when called
+
+**Solution:**
+```python
+# Add debug logging to your handler
+async def handle_my_tool(self, arguments: dict) -> CallToolResult:
+    self.logger.debug(f"Arguments received: {arguments}")
+    self.logger.debug(f"Argument types: {[(k, type(v)) for k, v in arguments.items()]}")
+    
+    # Rest of your handler...
+```
+
+Run in dev mode:
+```bash
+python -m src.custom.my_server.server --dev
+```
+
+**Problem:** Schema validation errors
+
+**Solution:**
+```python
+# Verify your input schema matches JSON Schema spec
+inputSchema={
+    "type": "object",
+    "properties": {
+        "value": {
+            "type": "string",  # Correct types: string, number, boolean, array, object
+            "description": "A value"
+        }
+    },
+    "required": ["value"]  # List of required fields
+}
+```
+
+#### Performance Issues
+
+**Problem:** Server is slow
+
+**Solution:**
+1. Enable caching for expensive operations:
+   ```python
+   class MyServer(BaseMCPServer):
+       def __init__(self, config_path=None):
+           super().__init__(config_path)
+           self.cache = {}  # Add caching
+   ```
+
+2. Check for blocking operations:
+   ```python
+   # Bad - blocks async loop
+   def expensive_operation():
+       time.sleep(10)
+   
+   # Good - use async
+   async def expensive_operation():
+       await asyncio.sleep(10)
+       # or run in executor
+       loop = asyncio.get_event_loop()
+       result = await loop.run_in_executor(None, blocking_function)
+   ```
+
+3. Monitor with metrics:
+   ```bash
+   curl http://localhost:8000/metrics
+   ```
+
+#### Development Issues
+
+**Problem:** Changes not taking effect
+
+**Solution:**
+```bash
+# Restart the server
+# If in Claude Desktop, restart Claude too
+
+# Clear Python cache
+find . -type d -name "__pycache__" -exec rm -r {} +
+find . -type f -name "*.pyc" -delete
+
+# Reinstall in development mode
+pip install -e .
+```
+
+**Problem:** Import errors
+
+**Solution:**
+```bash
+# Ensure you're running from project root
+cd /path/to/MyMCP
+
+# Use module syntax, not file syntax
+python -m src.custom.my_server.server  # ✅ Correct
+python src/custom/my_server/server.py   # ❌ May cause import issues
+```
+
+### Getting Help
+
+If you're still stuck:
+
+1. **Check Documentation:**
+   - [Architecture Guide](docs/ARCHITECTURE.md)
+   - [Adding Custom Servers](docs/ADDING_CUSTOM_SERVERS.md)
+   - [Core Framework README](src/core/README.md)
+
+2. **Review Examples:**
+   - Skeleton template: `src/templates/skeleton_server/`
+   - Math server: `src/builtin/math_server/`
+   - Stats server: `src/builtin/stats_server/`
+
+3. **Run Tests:**
+   ```bash
+   # Run all tests
+   pytest
+   
+   # Run specific tests
+   pytest tests/core/
+   pytest tests/builtin/math_server/
+   ```
+
+4. **Enable Debug Logging:**
+   ```bash
+   export MCP_LOG_LEVEL=DEBUG
+   python -m src.custom.my_server.server --dev
+   ```
+
+5. **Open an Issue:**
+   - Describe the problem
+   - Include error messages
+   - Share relevant code
+   - Mention your environment (OS, Python version)
 
 ## 📄 License
 
