@@ -7,6 +7,7 @@ percentile calculations, outlier detection, time series analysis, and signal pro
 import asyncio
 import logging
 from typing import Any
+import math
 import numpy as np
 from scipy import signal as scipy_signal
 from scipy.fft import fft, fftfreq
@@ -30,6 +31,20 @@ logging.basicConfig(
     handlers=[logging.StreamHandler()],  # Logs go to stderr by default
 )
 logger = logging.getLogger("stats-server")
+
+# Constants for numerical calculations and validation
+NUMERICAL_TOLERANCE = 1e-10  # Tolerance for numerical comparisons and singularity checks
+MIN_CONFIDENCE_LEVEL = 0.8  # Minimum confidence level for statistical inference
+MAX_CONFIDENCE_LEVEL = 0.999  # Maximum confidence level for statistical inference
+
+# SciPy imports for statistical tests
+try:
+    from scipy import stats as scipy_stats
+    from scipy import linalg
+    SCIPY_AVAILABLE = True
+except ImportError:
+    SCIPY_AVAILABLE = False
+    logger.warning("SciPy not available. Some advanced statistical tests will be unavailable.")
 
 
 # ============================================================================
@@ -742,7 +757,7 @@ def detect_trend(data: list[float], timestamps: list[float] = None, method: str 
         
         # Calculate slope (m) and intercept (b)
         denominator = n * sum_xx - sum_x ** 2
-        if abs(denominator) < 1e-10:
+        if abs(denominator) < NUMERICAL_TOLERANCE:
             raise ValueError("Cannot perform linear regression: timestamps have no variance")
         
         slope = (n * sum_xy - sum_x * sum_y) / denominator
@@ -1317,6 +1332,1010 @@ def rolling_statistics(data: list[float], window_size: int, statistics: list[str
 
 
 # ============================================================================
+# Regression Analysis Functions
+# ============================================================================
+
+
+def linear_regression(x: Any, y: list[float], confidence_level: float = 0.95, include_diagnostics: bool = True) -> dict[str, Any]:
+    """
+    Perform simple or multiple linear regression with comprehensive diagnostics.
+    
+    Use Cases:
+    - Equipment efficiency vs. load relationship
+    - Energy consumption vs. production rate
+    - Pump performance curves (head vs. flow)
+    - Temperature vs. pressure relationships
+    - Vibration amplitude vs. bearing wear
+    
+    Args:
+        x: Independent variable(s) - single array for simple regression or array of arrays for multiple regression
+        y: Dependent variable (response), min 3 items
+        confidence_level: Confidence level for intervals (0.5-0.999), default 0.95
+        include_diagnostics: Include full regression diagnostics, default True
+        
+    Returns:
+        Dictionary containing coefficients, statistics, confidence intervals, diagnostics, and interpretation
+    """
+    # Validate inputs
+    if not isinstance(y, list):
+        raise ValueError(f"y must be a list, got {type(y).__name__}")
+    
+    if len(y) < 3:
+        raise ValueError("y must contain at least 3 items")
+    
+    for i, value in enumerate(y):
+        if not isinstance(value, (int, float)):
+            raise ValueError(f"All y values must be numeric. Item at index {i} is {type(value).__name__}")
+    
+    if not isinstance(confidence_level, (int, float)):
+        raise ValueError(f"confidence_level must be numeric, got {type(confidence_level).__name__}")
+    
+    if confidence_level < MIN_CONFIDENCE_LEVEL or confidence_level > MAX_CONFIDENCE_LEVEL:
+        raise ValueError(f"confidence_level must be between {MIN_CONFIDENCE_LEVEL} and {MAX_CONFIDENCE_LEVEL}, got {confidence_level}")
+    
+    # Determine if simple or multiple regression
+    is_multiple = isinstance(x, list) and len(x) > 0 and isinstance(x[0], list)
+    
+    if is_multiple:
+        # Multiple regression: x is array of arrays
+        if len(x) != len(y):
+            raise ValueError(f"x length ({len(x)}) must match y length ({len(y)})")
+        
+        # Validate all rows have same number of variables
+        n_vars = len(x[0])
+        for i, row in enumerate(x):
+            if not isinstance(row, list):
+                raise ValueError(f"For multiple regression, each x row must be a list. Row {i} is {type(row).__name__}")
+            if len(row) != n_vars:
+                raise ValueError(f"All x rows must have same length. Row {i} has {len(row)}, expected {n_vars}")
+            for j, value in enumerate(row):
+                if not isinstance(value, (int, float)):
+                    raise ValueError(f"All x values must be numeric. Item at [{i}][{j}] is {type(value).__name__}")
+        
+        # Build design matrix X with intercept
+        n = len(y)
+        X = [[1.0] + list(row) for row in x]
+        n_params = n_vars + 1
+    else:
+        # Simple regression: x is single array
+        if not isinstance(x, list):
+            raise ValueError(f"x must be a list, got {type(x).__name__}")
+        
+        if len(x) != len(y):
+            raise ValueError(f"x length ({len(x)}) must match y length ({len(y)})")
+        
+        for i, value in enumerate(x):
+            if not isinstance(value, (int, float)):
+                raise ValueError(f"All x values must be numeric. Item at index {i} is {type(value).__name__}")
+        
+        # Build design matrix X with intercept
+        n = len(y)
+        X = [[1.0, xi] for xi in x]
+        n_params = 2
+    
+    if n < n_params:
+        raise ValueError(f"Need at least {n_params} observations for regression, got {n}")
+    
+    # Solve normal equations: (X'X)β = X'y
+    # Using matrix operations
+    XtX = [[sum(X[i][j] * X[i][k] for i in range(n)) for k in range(n_params)] for j in range(n_params)]
+    Xty = [sum(X[i][j] * y[i] for i in range(n)) for j in range(n_params)]
+    
+    # Solve for coefficients using Gaussian elimination
+    try:
+        coefficients = solve_linear_system(XtX, Xty)
+    except Exception as e:
+        raise ValueError(f"Cannot solve regression: matrix may be singular (multicollinearity). Error: {str(e)}")
+    
+    # Calculate predictions and residuals
+    predictions = [sum(X[i][j] * coefficients[j] for j in range(n_params)) for i in range(n)]
+    residuals = [y[i] - predictions[i] for i in range(n)]
+    
+    # Calculate statistics
+    mean_y = sum(y) / n
+    ss_tot = sum((yi - mean_y) ** 2 for yi in y)
+    ss_res = sum(r ** 2 for r in residuals)
+    ss_reg = ss_tot - ss_res
+    
+    # R-squared
+    r_squared = 1 - (ss_res / ss_tot) if ss_tot > 1e-10 else 1.0
+    
+    # Adjusted R-squared
+    adj_r_squared = 1 - ((1 - r_squared) * (n - 1) / (n - n_params)) if n > n_params else r_squared
+    
+    # RMSE and MAE
+    rmse = (ss_res / n) ** 0.5
+    mae = sum(abs(r) for r in residuals) / n
+    
+    # F-statistic
+    if n > n_params and ss_res > 1e-10:
+        f_statistic = (ss_reg / (n_params - 1)) / (ss_res / (n - n_params))
+        # Calculate p-value using F-distribution approximation
+        if SCIPY_AVAILABLE:
+            p_value = float(1 - scipy_stats.f.cdf(f_statistic, n_params - 1, n - n_params))
+        else:
+            p_value = None
+    else:
+        f_statistic = None
+        p_value = None
+    
+    # Build equation string
+    intercept = coefficients[0]
+    slopes = coefficients[1:]
+    
+    if is_multiple:
+        equation_parts = [f"{intercept:.4f}"]
+        for i, slope in enumerate(slopes):
+            sign = "+" if slope >= 0 else "-"
+            equation_parts.append(f"{sign} {abs(slope):.4f}*x{i+1}")
+        equation = "y = " + " ".join(equation_parts)
+    else:
+        slope = slopes[0]
+        sign = "+" if intercept >= 0 else "-"
+        equation = f"y = {slope:.4f}x {sign} {abs(intercept):.4f}"
+    
+    # Calculate confidence intervals for coefficients
+    if SCIPY_AVAILABLE and n > n_params:
+        # Standard errors
+        mse = ss_res / (n - n_params)
+        try:
+            XtX_inv = linalg.inv(XtX)
+            se_coeffs = [math.sqrt(mse * XtX_inv[i][i]) for i in range(n_params)]
+        except:
+            se_coeffs = [0] * n_params
+        
+        # t-value for confidence level
+        t_value = float(scipy_stats.t.ppf((1 + confidence_level) / 2, n - n_params))
+        
+        ci_intercept = [intercept - t_value * se_coeffs[0], intercept + t_value * se_coeffs[0]]
+        ci_slopes = [[slopes[i] - t_value * se_coeffs[i+1], slopes[i] + t_value * se_coeffs[i+1]] 
+                     for i in range(len(slopes))]
+    else:
+        ci_intercept = None
+        ci_slopes = None
+    
+    # Build result
+    result = {
+        "coefficients": {
+            "intercept": intercept,
+            "slopes": slopes,
+            "equation": equation
+        },
+        "statistics": {
+            "r_squared": r_squared,
+            "adj_r_squared": adj_r_squared,
+            "rmse": rmse,
+            "mae": mae,
+            "f_statistic": f_statistic,
+            "p_value": p_value,
+            "n_observations": n,
+            "n_parameters": n_params,
+            "degrees_of_freedom": n - n_params
+        }
+    }
+    
+    if ci_intercept is not None:
+        result["confidence_intervals"] = {
+            "confidence_level": confidence_level,
+            "intercept": ci_intercept,
+            "slopes": ci_slopes
+        }
+    
+    # Add diagnostics if requested
+    if include_diagnostics:
+        diagnostics = {
+            "residuals": residuals,
+            "predictions": predictions
+        }
+        
+        # Standardized residuals
+        std_residuals = [r / rmse for r in residuals] if rmse > 1e-10 else residuals
+        diagnostics["standardized_residuals"] = std_residuals
+        
+        # Durbin-Watson statistic for autocorrelation
+        if n > 1:
+            dw = sum((residuals[i] - residuals[i-1]) ** 2 for i in range(1, n)) / ss_res if ss_res > 1e-10 else 2.0
+            diagnostics["durbin_watson"] = dw
+        
+        result["diagnostics"] = diagnostics
+    
+    # Interpretation
+    if r_squared >= 0.9:
+        strength = "very strong"
+    elif r_squared >= 0.7:
+        strength = "strong"
+    elif r_squared >= 0.5:
+        strength = "moderate"
+    else:
+        strength = "weak"
+    
+    interpretation = f"{strength.capitalize()} relationship (R² = {r_squared:.3f}). Model explains {r_squared*100:.1f}% of variance."
+    
+    if p_value is not None and p_value < 0.05:
+        interpretation += " Statistically significant (p < 0.05)."
+    
+    result["interpretation"] = interpretation
+    result["warnings"] = []
+    
+    if r_squared < 0.5:
+        result["warnings"].append("Low R²: model may not fit data well")
+    
+    if n < 30:
+        result["warnings"].append(f"Small sample size (n={n}): results may be unreliable")
+    
+    return result
+
+
+def solve_linear_system(A: list[list[float]], b: list[float]) -> list[float]:
+    """Solve linear system Ax = b using Gaussian elimination with partial pivoting."""
+    n = len(b)
+    # Create augmented matrix
+    aug = [A[i][:] + [b[i]] for i in range(n)]
+    
+    # Forward elimination with partial pivoting
+    for i in range(n):
+        # Find pivot
+        max_row = i
+        for k in range(i + 1, n):
+            if abs(aug[k][i]) > abs(aug[max_row][i]):
+                max_row = k
+        
+        # Swap rows
+        aug[i], aug[max_row] = aug[max_row], aug[i]
+        
+        # Check for singular matrix
+        if abs(aug[i][i]) < NUMERICAL_TOLERANCE:
+            raise ValueError("Matrix is singular or near-singular")
+        
+        # Eliminate column
+        for k in range(i + 1, n):
+            factor = aug[k][i] / aug[i][i]
+            for j in range(i, n + 1):
+                aug[k][j] -= factor * aug[i][j]
+    
+    # Back substitution
+    x = [0.0] * n
+    for i in range(n - 1, -1, -1):
+        x[i] = aug[i][n]
+        for j in range(i + 1, n):
+            x[i] -= aug[i][j] * x[j]
+        x[i] /= aug[i][i]
+    
+    return x
+
+
+def polynomial_regression(x: list[float], y: list[float], degree: int = 2, auto_select_degree: bool = False) -> dict[str, Any]:
+    """
+    Fit polynomial curves for non-linear relationships.
+    
+    Use Cases:
+    - Compressor performance curves (non-linear)
+    - Valve characteristics (flow vs. position)
+    - Catalyst activity decline over time
+    - Temperature profiles in heat exchangers
+    - Motor torque vs. speed curves
+    - Pump efficiency curves
+    
+    Args:
+        x: Independent variable, min 5 items
+        y: Dependent variable, min 5 items
+        degree: Polynomial degree (2=quadratic, 3=cubic), 2-6, default 2
+        auto_select_degree: Automatically select best degree based on adjusted R², default False
+        
+    Returns:
+        Dictionary containing degree, coefficients, equation, R², turning points, and interpretation
+    """
+    # Validate inputs
+    if not isinstance(x, list) or not isinstance(y, list):
+        raise ValueError("x and y must be lists")
+    
+    if len(x) < 5 or len(y) < 5:
+        raise ValueError("x and y must contain at least 5 items")
+    
+    if len(x) != len(y):
+        raise ValueError(f"x length ({len(x)}) must match y length ({len(y)})")
+    
+    for i, value in enumerate(x):
+        if not isinstance(value, (int, float)):
+            raise ValueError(f"All x values must be numeric. Item at index {i} is {type(value).__name__}")
+    
+    for i, value in enumerate(y):
+        if not isinstance(value, (int, float)):
+            raise ValueError(f"All y values must be numeric. Item at index {i} is {type(value).__name__}")
+    
+    if not isinstance(degree, int):
+        raise ValueError(f"degree must be an integer, got {type(degree).__name__}")
+    
+    if degree < 2 or degree > 6:
+        raise ValueError(f"degree must be between 2 and 6, got {degree}")
+    
+    n = len(x)
+    if n <= degree:
+        raise ValueError(f"Need at least {degree + 1} observations for degree {degree} polynomial")
+    
+    # Auto-select degree if requested
+    if auto_select_degree:
+        best_degree = 2
+        best_adj_r2 = -1
+        
+        for d in range(2, min(7, n)):
+            try:
+                result = polynomial_regression(x, y, degree=d, auto_select_degree=False)
+                adj_r2 = result['adj_r_squared']
+                if adj_r2 > best_adj_r2:
+                    best_adj_r2 = adj_r2
+                    best_degree = d
+            except:
+                break
+        
+        degree = best_degree
+    
+    # Build design matrix for polynomial: [1, x, x^2, ..., x^degree]
+    X = [[xi ** j for j in range(degree + 1)] for xi in x]
+    
+    # Solve using linear regression approach
+    n_params = degree + 1
+    XtX = [[sum(X[i][j] * X[i][k] for i in range(n)) for k in range(n_params)] for j in range(n_params)]
+    Xty = [sum(X[i][j] * y[i] for i in range(n)) for j in range(n_params)]
+    
+    try:
+        coefficients = solve_linear_system(XtX, Xty)
+    except Exception as e:
+        raise ValueError(f"Cannot solve polynomial regression: {str(e)}")
+    
+    # Calculate predictions and statistics
+    predictions = [sum(coefficients[j] * (xi ** j) for j in range(n_params)) for xi in x]
+    residuals = [y[i] - predictions[i] for i in range(n)]
+    
+    mean_y = sum(y) / n
+    ss_tot = sum((yi - mean_y) ** 2 for yi in y)
+    ss_res = sum(r ** 2 for r in residuals)
+    
+    r_squared = 1 - (ss_res / ss_tot) if ss_tot > 1e-10 else 1.0
+    adj_r_squared = 1 - ((1 - r_squared) * (n - 1) / (n - n_params)) if n > n_params else r_squared
+    rmse = (ss_res / n) ** 0.5
+    
+    # Build equation string
+    equation_parts = []
+    for i in range(degree, -1, -1):
+        coef = coefficients[i]
+        if abs(coef) > 1e-10:
+            if i == degree:
+                equation_parts.append(f"{coef:.4f}x^{i}" if i > 1 else (f"{coef:.4f}x" if i == 1 else f"{coef:.4f}"))
+            else:
+                sign = "+" if coef >= 0 else "-"
+                if i > 1:
+                    equation_parts.append(f"{sign} {abs(coef):.4f}x^{i}")
+                elif i == 1:
+                    equation_parts.append(f"{sign} {abs(coef):.4f}x")
+                else:
+                    equation_parts.append(f"{sign} {abs(coef):.4f}")
+    
+    equation = "y = " + " ".join(equation_parts) if equation_parts else "y = 0"
+    
+    # Find turning points (critical points) for degree >= 2
+    turning_points = []
+    if degree >= 2:
+        # Derivative coefficients
+        deriv_coeffs = [coefficients[i] * i for i in range(1, degree + 1)]
+        
+        # For quadratic, solve analytically
+        if degree == 2:
+            a, b = deriv_coeffs[1], deriv_coeffs[0]
+            if abs(a) > 1e-10:
+                x_crit = -b / (2 * a)
+                # Check if within data range
+                x_min, x_max = min(x), max(x)
+                if x_min <= x_crit <= x_max:
+                    y_crit = sum(coefficients[j] * (x_crit ** j) for j in range(degree + 1))
+                    point_type = "maximum" if a < 0 else "minimum"
+                    turning_points.append({"x": x_crit, "y": y_crit, "type": point_type})
+    
+    # Optimal point (if exists)
+    optimal_x = None
+    optimal_y = None
+    if turning_points:
+        # For engineering, often interested in maximum
+        max_point = max(turning_points, key=lambda p: p["y"])
+        optimal_x = max_point["x"]
+        optimal_y = max_point["y"]
+    
+    # Interpretation
+    if degree == 2:
+        shape = "parabolic"
+    elif degree == 3:
+        shape = "cubic"
+    else:
+        shape = f"degree-{degree} polynomial"
+    
+    if optimal_x is not None:
+        interpretation = f"{shape.capitalize()} relationship with {turning_points[0]['type']} at x={optimal_x:.2f}"
+    else:
+        interpretation = f"{shape.capitalize()} relationship"
+    
+    # Goodness of fit
+    if r_squared >= 0.95:
+        gof = "Excellent"
+    elif r_squared >= 0.85:
+        gof = "Good"
+    elif r_squared >= 0.7:
+        gof = "Fair"
+    else:
+        gof = "Poor"
+    
+    return {
+        "degree": degree,
+        "coefficients": coefficients,
+        "equation": equation,
+        "r_squared": r_squared,
+        "adj_r_squared": adj_r_squared,
+        "rmse": rmse,
+        "turning_points": turning_points,
+        "optimal_x": optimal_x,
+        "optimal_y": optimal_y,
+        "interpretation": interpretation,
+        "goodness_of_fit": f"{gof} (R² = {r_squared:.3f})",
+        "statistics": {
+            "n_observations": n,
+            "n_parameters": n_params,
+            "degrees_of_freedom": n - n_params
+        }
+    }
+
+
+def residual_analysis(actual: list[float], predicted: list[float], x_values: list[float] = None) -> dict[str, Any]:
+    """
+    Comprehensive analysis of regression residuals to validate model assumptions.
+    
+    Use Cases:
+    - Validate regression model assumptions
+    - Detect non-linearity or missing variables
+    - Identify outliers and influential points
+    - Check for heteroscedasticity
+    - Verify normality of errors
+    - Detect autocorrelation in time series regressions
+    
+    Args:
+        actual: Actual observed values, min 10 items
+        predicted: Model predicted values, min 10 items
+        x_values: Independent variable values (optional), min 10 items
+        
+    Returns:
+        Dictionary containing residuals, tests, outliers, patterns, assessment, and recommendations
+    """
+    # Validate inputs
+    if not isinstance(actual, list) or not isinstance(predicted, list):
+        raise ValueError("actual and predicted must be lists")
+    
+    if len(actual) < 10 or len(predicted) < 10:
+        raise ValueError("actual and predicted must contain at least 10 items")
+    
+    if len(actual) != len(predicted):
+        raise ValueError(f"actual length ({len(actual)}) must match predicted length ({len(predicted)})")
+    
+    for i, value in enumerate(actual):
+        if not isinstance(value, (int, float)):
+            raise ValueError(f"All actual values must be numeric. Item at index {i} is {type(value).__name__}")
+    
+    for i, value in enumerate(predicted):
+        if not isinstance(value, (int, float)):
+            raise ValueError(f"All predicted values must be numeric. Item at index {i} is {type(value).__name__}")
+    
+    if x_values is not None:
+        if not isinstance(x_values, list):
+            raise ValueError("x_values must be a list")
+        if len(x_values) != len(actual):
+            raise ValueError(f"x_values length ({len(x_values)}) must match actual length ({len(actual)})")
+        for i, value in enumerate(x_values):
+            if not isinstance(value, (int, float)):
+                raise ValueError(f"All x_values must be numeric. Item at index {i} is {type(value).__name__}")
+    
+    n = len(actual)
+    
+    # Calculate residuals
+    residuals = [actual[i] - predicted[i] for i in range(n)]
+    
+    # Calculate standardized residuals
+    mean_residual = sum(residuals) / n
+    std_residual = (sum((r - mean_residual) ** 2 for r in residuals) / n) ** 0.5
+    
+    if std_residual < 1e-10:
+        std_residual = 1.0
+    
+    standardized_residuals = [(r - mean_residual) / std_residual for r in residuals]
+    
+    # Tests dictionary
+    tests = {}
+    
+    # Normality test (Shapiro-Wilk)
+    if SCIPY_AVAILABLE:
+        try:
+            sw_stat, sw_p = scipy_stats.shapiro(residuals)
+            conclusion = "Residuals are normally distributed (p > 0.05)" if sw_p > 0.05 else "Residuals may not be normally distributed (p ≤ 0.05)"
+            tests["normality"] = {
+                "shapiro_wilk_statistic": float(sw_stat),
+                "p_value": float(sw_p),
+                "conclusion": conclusion
+            }
+        except:
+            tests["normality"] = {"error": "Could not perform Shapiro-Wilk test"}
+    
+    # Autocorrelation test (Durbin-Watson)
+    if n > 1:
+        dw = sum((residuals[i] - residuals[i-1]) ** 2 for i in range(1, n)) / sum(r ** 2 for r in residuals) if sum(r ** 2 for r in residuals) > 1e-10 else 2.0
+        
+        if dw < 1.5:
+            dw_conclusion = "Positive autocorrelation detected"
+        elif dw > 2.5:
+            dw_conclusion = "Negative autocorrelation detected"
+        else:
+            dw_conclusion = "No significant autocorrelation"
+        
+        tests["autocorrelation"] = {
+            "durbin_watson": dw,
+            "conclusion": dw_conclusion
+        }
+    
+    # Homoscedasticity test (simplified Breusch-Pagan)
+    # Test if variance of residuals is constant
+    if x_values is not None and SCIPY_AVAILABLE:
+        # Simple test: correlate squared residuals with x
+        squared_resid = [r ** 2 for r in residuals]
+        try:
+            bp_corr, bp_p = scipy_stats.pearsonr(x_values, squared_resid)
+            conclusion = "Constant variance assumption met (p > 0.05)" if bp_p > 0.05 else "Heteroscedasticity detected (p ≤ 0.05)"
+            tests["homoscedasticity"] = {
+                "test_statistic": abs(float(bp_corr)),
+                "p_value": float(bp_p),
+                "conclusion": conclusion
+            }
+        except:
+            tests["homoscedasticity"] = {"note": "Could not perform test"}
+    
+    # Identify outliers (standardized residuals > 3 or < -3)
+    outlier_indices = []
+    outlier_info = []
+    
+    for i, std_res in enumerate(standardized_residuals):
+        if abs(std_res) > 3:
+            outlier_indices.append(i)
+            outlier_info.append({
+                "index": i,
+                "residual": residuals[i],
+                "standardized": std_res
+            })
+    
+    outliers = {
+        "indices": outlier_indices,
+        "values": outlier_info,
+        "count": len(outlier_indices)
+    }
+    
+    # Pattern detection (simplified)
+    patterns_detected = []
+    
+    # Check for trend in residuals
+    if len(residuals) >= 10:
+        # Simple trend check: compare first half vs second half
+        mid = n // 2
+        first_half_mean = sum(residuals[:mid]) / mid
+        second_half_mean = sum(residuals[mid:]) / (n - mid)
+        
+        if abs(first_half_mean - second_half_mean) > std_residual:
+            patterns_detected.append("Possible trend in residuals suggests missing variables or non-linearity")
+    
+    # Overall assessment
+    issues = []
+    
+    if "normality" in tests and tests["normality"].get("p_value", 1) < 0.05:
+        issues.append("Non-normal residuals")
+    
+    if "autocorrelation" in tests and (tests["autocorrelation"]["durbin_watson"] < 1.5 or tests["autocorrelation"]["durbin_watson"] > 2.5):
+        issues.append("Autocorrelation present")
+    
+    if "homoscedasticity" in tests and tests["homoscedasticity"].get("p_value", 1) < 0.05:
+        issues.append("Heteroscedasticity present")
+    
+    if outliers["count"] > 0:
+        issues.append(f"{outliers['count']} outlier(s) detected")
+    
+    if len(issues) == 0:
+        overall_assessment = "Model assumptions are satisfied. Residuals show random scatter with no patterns."
+    else:
+        overall_assessment = f"Model has issues: {', '.join(issues)}"
+    
+    # Recommendations
+    recommendations = []
+    
+    if "Non-normal residuals" in issues:
+        recommendations.append("Consider transformation of y (log, sqrt) or robust regression")
+    
+    if "Autocorrelation present" in issues:
+        recommendations.append("Consider time series model or add lagged variables")
+    
+    if "Heteroscedasticity present" in issues:
+        recommendations.append("Consider weighted least squares or transformation of y")
+    
+    if outliers["count"] > 0:
+        recommendations.append("Investigate outliers: may be data errors or require separate analysis")
+    
+    if patterns_detected:
+        recommendations.append("Model may be missing important variables or non-linear terms")
+    
+    return {
+        "residuals": residuals,
+        "standardized_residuals": standardized_residuals,
+        "tests": tests,
+        "outliers": outliers,
+        "patterns_detected": patterns_detected,
+        "overall_assessment": overall_assessment,
+        "recommendations": recommendations
+    }
+
+
+def prediction_with_intervals(model: dict, x_new: list[float], confidence_level: float = 0.95) -> dict[str, Any]:
+    """
+    Generate predictions with confidence and prediction intervals.
+    
+    Use Cases:
+    - Forecast equipment performance at specific operating conditions
+    - Estimate production output with uncertainty bounds
+    - Predict energy consumption with confidence intervals
+    - Estimate maintenance costs with uncertainty
+    - Calculate expected valve position for desired flow
+    - Predict process yield with tolerance bands
+    
+    Args:
+        model: Regression model dict with 'coefficients' (dict or list), 'rmse', optional 'degree'
+        x_new: New x values for prediction
+        confidence_level: Confidence level (0-1), default 0.95
+        
+    Returns:
+        Dictionary containing predictions with confidence and prediction intervals
+    """
+    # Validate inputs
+    if not isinstance(model, dict):
+        raise ValueError("model must be a dictionary")
+    
+    if "coefficients" not in model:
+        raise ValueError("model must contain 'coefficients'")
+    
+    if "rmse" not in model:
+        raise ValueError("model must contain 'rmse'")
+    
+    if not isinstance(x_new, list):
+        raise ValueError("x_new must be a list")
+    
+    if len(x_new) < 1:
+        raise ValueError("x_new must contain at least 1 value")
+    
+    for i, value in enumerate(x_new):
+        if not isinstance(value, (int, float)):
+            raise ValueError(f"All x_new values must be numeric. Item at index {i} is {type(value).__name__}")
+    
+    if not isinstance(confidence_level, (int, float)):
+        raise ValueError("confidence_level must be numeric")
+    
+    if confidence_level <= 0 or confidence_level >= 1:
+        raise ValueError(f"confidence_level must be between 0 and 1, got {confidence_level}")
+    
+    # Extract model parameters
+    coeffs = model["coefficients"]
+    rmse = model["rmse"]
+    degree = model.get("degree", None)
+    
+    # Get sample size information for proper interval calculations
+    stats = model.get("statistics", {})
+    n_obs = stats.get("n_observations", 30)  # Default to 30 if not available
+    n_params = stats.get("n_parameters", 2)  # Default to 2 if not available
+    df = stats.get("degrees_of_freedom", n_obs - n_params)  # Calculate if not available
+    
+    # Determine model type
+    if isinstance(coeffs, dict):
+        # Linear regression format
+        intercept = coeffs.get("intercept", 0)
+        slopes = coeffs.get("slopes", [])
+        is_polynomial = False
+    elif isinstance(coeffs, list):
+        # Polynomial regression format
+        is_polynomial = True
+        degree = degree if degree is not None else len(coeffs) - 1
+    else:
+        raise ValueError("coefficients must be a dict or list")
+    
+    # Generate predictions
+    predictions = []
+    
+    for xi in x_new:
+        if is_polynomial:
+            # Polynomial: y = c0 + c1*x + c2*x^2 + ...
+            pred_y = sum(coeffs[j] * (xi ** j) for j in range(len(coeffs)))
+        else:
+            # Linear: y = intercept + slope*x (simple) or intercept + sum(slopes*x) (multiple)
+            if len(slopes) == 1:
+                pred_y = intercept + slopes[0] * xi
+            else:
+                # For multiple regression, xi should be a list
+                if not isinstance(xi, list):
+                    raise ValueError("For multiple regression, each x_new value must be a list")
+                pred_y = intercept + sum(slopes[i] * xi[i] for i in range(len(slopes)))
+        
+        # Confidence interval (for mean response)
+        # CI ≈ ŷ ± t * rmse / sqrt(n)
+        # Using proper t-value with actual degrees of freedom
+        if SCIPY_AVAILABLE and df > 0:
+            t_value = float(scipy_stats.t.ppf((1 + confidence_level) / 2, df))
+        else:
+            t_value = 2.0  # Rough approximation if scipy not available
+        
+        # Use actual sample size
+        ci_margin = t_value * rmse / math.sqrt(n_obs) if n_obs > 0 else t_value * rmse
+        ci_lower = pred_y - ci_margin
+        ci_upper = pred_y + ci_margin
+        
+        # Prediction interval (for individual observation)
+        # PI ≈ ŷ ± t * rmse * sqrt(1 + 1/n)
+        # This accounts for both model uncertainty and individual variation
+        pi_margin = t_value * rmse * math.sqrt(1 + 1/n_obs) if n_obs > 0 else t_value * rmse * math.sqrt(2)
+        pi_lower = pred_y - pi_margin
+        pi_upper = pred_y + pi_margin
+        
+        x_val = xi if not isinstance(xi, list) else xi
+        interpretation = f"At x={x_val}, predicted y is {pred_y:.2f} ({confidence_level*100:.0f}% CI: {ci_lower:.2f}-{ci_upper:.2f})"
+        
+        predictions.append({
+            "x": x_val,
+            "predicted_y": pred_y,
+            "confidence_interval": [ci_lower, ci_upper],
+            "prediction_interval": [pi_lower, pi_upper],
+            "interpretation": interpretation
+        })
+    
+    # Check for extrapolation warning
+    # This is simplified - in practice, need training data range
+    extrapolation_warning = False
+    
+    # Reliability assessment
+    if rmse < 1.0:
+        reliability = "high"
+    elif rmse < 5.0:
+        reliability = "medium"
+    else:
+        reliability = "low"
+    
+    return {
+        "predictions": predictions,
+        "confidence_level": confidence_level,
+        "extrapolation_warning": extrapolation_warning,
+        "reliability": reliability
+    }
+
+
+def multivariate_regression(X: list[list[float]], y: list[float], variable_names: list[str] = None, standardize: bool = False) -> dict[str, Any]:
+    """
+    Multiple linear regression with multiple independent variables.
+    
+    Use Cases:
+    - Chiller efficiency vs. load, ambient temp, condenser flow
+    - Production yield vs. temperature, pressure, catalyst age
+    - Energy consumption vs. production rate, ambient conditions, equipment age
+    - Compressor power vs. suction pressure, discharge pressure, flow rate
+    - Product quality vs. multiple process parameters
+    
+    Args:
+        X: Matrix of independent variables [[x1_1, x2_1, ...], [x1_2, x2_2, ...], ...], min 5 rows
+        y: Dependent variable, min 5 items
+        variable_names: Names for each independent variable, default ["X1", "X2", ...]
+        standardize: Standardize variables for coefficient comparison, default False
+        
+    Returns:
+        Dictionary containing coefficients, statistics, variable importance, VIF, and interpretation
+        
+    Note:
+        P-value calculations use an approximate standard error (SE ≈ RMSE/√n) which is simplified.
+        For more accurate p-values, consider using dedicated statistical packages that compute
+        the full covariance matrix (X'X)^-1. The provided p-values should be used as rough
+        indicators of significance, not for formal hypothesis testing.
+    """
+    # Validate inputs
+    if not isinstance(X, list) or not isinstance(y, list):
+        raise ValueError("X and y must be lists")
+    
+    if len(X) < 5 or len(y) < 5:
+        raise ValueError("X and y must contain at least 5 items")
+    
+    if len(X) != len(y):
+        raise ValueError(f"X length ({len(X)}) must match y length ({len(y)})")
+    
+    # Validate X is matrix
+    if not all(isinstance(row, list) for row in X):
+        raise ValueError("X must be a list of lists (matrix)")
+    
+    n_vars = len(X[0])
+    if n_vars < 1:
+        raise ValueError("X must have at least 1 variable")
+    
+    for i, row in enumerate(X):
+        if len(row) != n_vars:
+            raise ValueError(f"All X rows must have same length. Row {i} has {len(row)}, expected {n_vars}")
+        for j, value in enumerate(row):
+            if not isinstance(value, (int, float)):
+                raise ValueError(f"All X values must be numeric. Item at [{i}][{j}] is {type(value).__name__}")
+    
+    for i, value in enumerate(y):
+        if not isinstance(value, (int, float)):
+            raise ValueError(f"All y values must be numeric. Item at index {i} is {type(value).__name__}")
+    
+    # Set default variable names
+    if variable_names is None:
+        variable_names = [f"X{i+1}" for i in range(n_vars)]
+    else:
+        if len(variable_names) != n_vars:
+            raise ValueError(f"variable_names length must match number of variables ({n_vars})")
+    
+    n = len(y)
+    
+    # Standardize if requested
+    if standardize:
+        # Standardize X
+        X_means = [sum(X[i][j] for i in range(n)) / n for j in range(n_vars)]
+        X_stds = [(sum((X[i][j] - X_means[j]) ** 2 for i in range(n)) / n) ** 0.5 for j in range(n_vars)]
+        
+        # Prevent division by zero
+        for j in range(n_vars):
+            if X_stds[j] < 1e-10:
+                X_stds[j] = 1.0
+        
+        X_std = [[(X[i][j] - X_means[j]) / X_stds[j] for j in range(n_vars)] for i in range(n)]
+        
+        # Standardize y
+        y_mean = sum(y) / n
+        y_std = (sum((yi - y_mean) ** 2 for yi in y) / n) ** 0.5
+        if y_std < 1e-10:
+            y_std = 1.0
+        
+        y_std_vals = [(yi - y_mean) / y_std for yi in y]
+    else:
+        X_std = X
+        y_std_vals = y
+    
+    # Use linear_regression function
+    try:
+        result = linear_regression(X_std, y_std_vals, confidence_level=0.95, include_diagnostics=False)
+    except Exception as e:
+        raise ValueError(f"Regression failed: {str(e)}")
+    
+    # Extract results
+    intercept = result["coefficients"]["intercept"]
+    slopes = result["coefficients"]["slopes"]
+    r_squared = result["statistics"]["r_squared"]
+    adj_r_squared = result["statistics"]["adj_r_squared"]
+    
+    # Build equation with variable names
+    equation_parts = [f"{intercept:.4f}"]
+    for i, (name, slope) in enumerate(zip(variable_names, slopes)):
+        sign = "+" if slope >= 0 else "-"
+        equation_parts.append(f"{sign} {abs(slope):.4f}*{name}")
+    
+    equation = " ".join(equation_parts)
+    
+    # Variable importance (based on absolute standardized coefficients)
+    variable_importance = []
+    
+    # Calculate standard errors for p-values if possible
+    if SCIPY_AVAILABLE and result["statistics"].get("degrees_of_freedom", 0) > 0:
+        # Get standard errors from the linear regression result
+        # Note: This is approximate since we don't have the full covariance matrix
+        # For a more accurate implementation, we would need to compute the full (X'X)^-1 matrix
+        df = result["statistics"]["degrees_of_freedom"]
+        rmse_model = result["statistics"]["rmse"]
+        
+        for i, (name, slope) in enumerate(zip(variable_names, slopes)):
+            # Approximate standard error (this is simplified)
+            # In practice, we'd need sqrt(MSE * (X'X)^-1[i,i])
+            se_approx = rmse_model / math.sqrt(n)  # Very rough approximation
+            
+            if se_approx > 1e-10:
+                t_stat = slope / se_approx
+                # Calculate two-tailed p-value
+                p_value = float(2 * (1 - scipy_stats.t.cdf(abs(t_stat), df)))
+            else:
+                p_value = None
+            
+            if p_value is not None:
+                if p_value < 0.001:
+                    significance = "***"
+                elif p_value < 0.01:
+                    significance = "**"
+                elif p_value < 0.05:
+                    significance = "*"
+                else:
+                    significance = ""
+            else:
+                significance = ""
+            
+            variable_importance.append({
+                "variable": name,
+                "coefficient": slope,
+                "p_value": p_value,
+                "significance": significance
+            })
+    else:
+        # If scipy not available or insufficient data, just use coefficients
+        for i, (name, slope) in enumerate(zip(variable_names, slopes)):
+            variable_importance.append({
+                "variable": name,
+                "coefficient": slope,
+                "p_value": None,
+                "significance": ""
+            })
+    
+    # Sort by absolute coefficient value
+    variable_importance.sort(key=lambda v: abs(v["coefficient"]), reverse=True)
+    
+    # Calculate VIF (Variance Inflation Factor) for multicollinearity detection
+    vif_values = {}
+    
+    if n_vars > 1 and n > n_vars + 1:
+        for i in range(n_vars):
+            # For each variable, regress it against all others
+            X_i = [[X[row][j] for j in range(n_vars) if j != i] for row in range(n)]
+            y_i = [X[row][i] for row in range(n)]
+            
+            try:
+                reg_i = linear_regression(X_i, y_i, include_diagnostics=False)
+                r2_i = reg_i["statistics"]["r_squared"]
+                
+                if r2_i < 0.999:
+                    vif = 1 / (1 - r2_i)
+                else:
+                    vif = 999  # High multicollinearity
+                
+                vif_values[variable_names[i]] = vif
+            except:
+                vif_values[variable_names[i]] = None
+    
+    # Multicollinearity assessment
+    if vif_values:
+        max_vif = max(v for v in vif_values.values() if v is not None)
+        if max_vif < 5:
+            multicollinearity = "Low - all VIF < 5"
+        elif max_vif < 10:
+            multicollinearity = "Moderate - some VIF between 5 and 10"
+        else:
+            multicollinearity = "High - VIF > 10, consider removing correlated variables"
+    else:
+        multicollinearity = "Not calculated"
+    
+    # Interpretation
+    most_important = variable_importance[0]["variable"]
+    interpretation = f"{most_important} has strongest effect."
+    
+    significant_vars = [v["variable"] for v in variable_importance if v.get("p_value") is not None and v["p_value"] < 0.05]
+    if len(significant_vars) == len(variable_names):
+        interpretation += " All variables are significant."
+    elif len(significant_vars) > 0:
+        interpretation += f" Significant variables: {', '.join(significant_vars)}."
+    else:
+        interpretation += " No variables are statistically significant."
+    
+    return {
+        "coefficients": {
+            "intercept": intercept,
+            **{name: slope for name, slope in zip(variable_names, slopes)},
+            "equation": equation
+        },
+        "r_squared": r_squared,
+        "adj_r_squared": adj_r_squared,
+        "variable_importance": variable_importance,
+        "vif": vif_values,
+        "multicollinearity": multicollinearity,
+        "interpretation": interpretation
+    }
+
+
+# ============================================================================
+# MCP Server Setup
 # Signal Processing Functions
 # ============================================================================
 
@@ -4180,6 +5199,181 @@ async def list_tools() -> list[Tool]:
                 },
                 "required": ["signal", "sample_rate", "fundamental_freq"]
             }
+        ),
+        Tool(
+            name="linear_regression",
+            description=(
+                "Perform simple or multiple linear regression with comprehensive diagnostics. "
+                "Use cases: equipment efficiency vs. load, energy consumption vs. production rate, "
+                "pump performance curves, temperature vs. pressure relationships, vibration vs. bearing wear. "
+                "Returns coefficients, R², confidence intervals, diagnostics (Durbin-Watson), and interpretation."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "x": {
+                        "description": "Independent variable(s) - single array for simple regression or array of arrays for multiple regression",
+                        "minItems": 3
+                    },
+                    "y": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Dependent variable (response)",
+                        "minItems": 3
+                    },
+                    "confidence_level": {
+                        "type": "number",
+                        "description": f"Confidence level for intervals ({MIN_CONFIDENCE_LEVEL}-{MAX_CONFIDENCE_LEVEL})",
+                        "minimum": MIN_CONFIDENCE_LEVEL,
+                        "maximum": MAX_CONFIDENCE_LEVEL,
+                        "default": 0.95
+                    },
+                    "include_diagnostics": {
+                        "type": "boolean",
+                        "description": "Include full regression diagnostics",
+                        "default": True
+                    }
+                },
+                "required": ["x", "y"]
+            }
+        ),
+        Tool(
+            name="polynomial_regression",
+            description=(
+                "Fit polynomial curves for non-linear relationships. "
+                "Use cases: compressor performance curves, valve characteristics, catalyst activity decline, "
+                "temperature profiles, motor torque vs. speed, pump efficiency curves. "
+                "Returns coefficients, R², turning points, optimal values, and interpretation."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "x": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Independent variable",
+                        "minItems": 5
+                    },
+                    "y": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Dependent variable",
+                        "minItems": 5
+                    },
+                    "degree": {
+                        "type": "integer",
+                        "description": "Polynomial degree (2=quadratic, 3=cubic)",
+                        "minimum": 2,
+                        "maximum": 6,
+                        "default": 2
+                    },
+                    "auto_select_degree": {
+                        "type": "boolean",
+                        "description": "Automatically select best degree based on adjusted R²",
+                        "default": False
+                    }
+                },
+                "required": ["x", "y"]
+            }
+        ),
+        Tool(
+            name="residual_analysis",
+            description=(
+                "Comprehensive analysis of regression residuals to validate model assumptions. "
+                "Use cases: validate assumptions, detect non-linearity, identify outliers, check heteroscedasticity, "
+                "verify normality, detect autocorrelation. Includes Shapiro-Wilk, Durbin-Watson tests."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "actual": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Actual observed values",
+                        "minItems": 10
+                    },
+                    "predicted": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Model predicted values",
+                        "minItems": 10
+                    },
+                    "x_values": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Independent variable values (optional)",
+                        "minItems": 10
+                    }
+                },
+                "required": ["actual", "predicted"]
+            }
+        ),
+        Tool(
+            name="prediction_with_intervals",
+            description=(
+                "Generate predictions with confidence and prediction intervals. "
+                "Use cases: forecast equipment performance, estimate production with uncertainty, "
+                "predict energy consumption with confidence intervals, estimate maintenance costs, "
+                "calculate valve position for desired flow, predict process yield with tolerance bands."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "model": {
+                        "type": "object",
+                        "description": "Regression model from linear_regression or polynomial_regression (must have 'coefficients' and 'rmse')"
+                    },
+                    "x_new": {
+                        "type": "array",
+                        "description": "New x values for prediction",
+                        "minItems": 1
+                    },
+                    "confidence_level": {
+                        "type": "number",
+                        "description": "Confidence level (0-1)",
+                        "minimum": 0,
+                        "maximum": 1,
+                        "default": 0.95
+                    }
+                },
+                "required": ["model", "x_new"]
+            }
+        ),
+        Tool(
+            name="multivariate_regression",
+            description=(
+                "Multiple linear regression with multiple independent variables. "
+                "Use cases: chiller efficiency vs. multiple factors, production yield vs. process parameters, "
+                "energy consumption vs. multiple conditions, compressor power vs. pressures and flow, "
+                "product quality vs. process variables. Includes VIF for multicollinearity detection."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "X": {
+                        "type": "array",
+                        "description": "Matrix of independent variables [[x1_1, x2_1, ...], [x1_2, x2_2, ...], ...]",
+                        "minItems": 5
+                    },
+                    "y": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Dependent variable",
+                        "minItems": 5
+                    },
+                    "variable_names": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Names for each independent variable"
+                    },
+                    "standardize": {
+                        "type": "boolean",
+                        "description": "Standardize variables for coefficient comparison",
+                        "default": False
+                    }
+                },
+                "required": ["X", "y"]
+            }
         )
     ]
 
@@ -4819,6 +6013,37 @@ async def handle_change_point_detection(arguments: Any) -> CallToolResult:
     
     # Detect change points
     try:
+        # Route to appropriate handler based on tool name
+        if name == "descriptive_stats":
+            return await handle_descriptive_stats(arguments)
+        elif name == "correlation":
+            return await handle_correlation(arguments)
+        elif name == "percentile":
+            return await handle_percentile(arguments)
+        elif name == "detect_outliers":
+            return await handle_detect_outliers(arguments)
+        elif name == "moving_average":
+            return await handle_moving_average(arguments)
+        elif name == "detect_trend":
+            return await handle_detect_trend(arguments)
+        elif name == "autocorrelation":
+            return await handle_autocorrelation(arguments)
+        elif name == "change_point_detection":
+            return await handle_change_point_detection(arguments)
+        elif name == "rate_of_change":
+            return await handle_rate_of_change(arguments)
+        elif name == "rolling_statistics":
+            return await handle_rolling_statistics(arguments)
+        elif name == "linear_regression":
+            return await handle_linear_regression(arguments)
+        elif name == "polynomial_regression":
+            return await handle_polynomial_regression(arguments)
+        elif name == "residual_analysis":
+            return await handle_residual_analysis(arguments)
+        elif name == "prediction_with_intervals":
+            return await handle_prediction_with_intervals(arguments)
+        elif name == "multivariate_regression":
+            return await handle_multivariate_regression(arguments)
         logger.info(f"Detecting change points using {method} method")
         result = change_point_detection(data, method, threshold, min_size)
         
@@ -5724,6 +6949,281 @@ async def handle_ewma_chart(arguments: Any) -> CallToolResult:
         logger.error(f"Validation error: {e}")
         return CallToolResult(
             content=[TextContent(type="text", text=f"Validation error: {str(e)}")],
+            isError=True,
+        )
+
+
+async def handle_linear_regression(arguments: Any) -> CallToolResult:
+    """Handle linear_regression tool calls."""
+    x = arguments.get("x")
+    y = arguments.get("y")
+    confidence_level = arguments.get("confidence_level", 0.95)
+    include_diagnostics = arguments.get("include_diagnostics", True)
+    
+    if x is None or y is None:
+        return CallToolResult(
+            content=[TextContent(type="text", text="Missing required parameters 'x' and 'y'")],
+            isError=True,
+        )
+    
+    try:
+        logger.info("Performing linear regression")
+        result = linear_regression(x, y, confidence_level, include_diagnostics)
+        
+        # Format output
+        result_text = f"Linear Regression Analysis:\n\n"
+        result_text += f"Equation: {result['coefficients']['equation']}\n\n"
+        
+        result_text += f"Model Statistics:\n"
+        result_text += f"  R²: {result['statistics']['r_squared']:.4f}\n"
+        result_text += f"  Adjusted R²: {result['statistics']['adj_r_squared']:.4f}\n"
+        result_text += f"  RMSE: {result['statistics']['rmse']:.4f}\n"
+        result_text += f"  MAE: {result['statistics']['mae']:.4f}\n"
+        if result['statistics']['f_statistic'] is not None:
+            result_text += f"  F-statistic: {result['statistics']['f_statistic']:.2f}\n"
+        if result['statistics']['p_value'] is not None:
+            result_text += f"  p-value: {result['statistics']['p_value']:.4f}\n"
+        
+        if "confidence_intervals" in result:
+            result_text += f"\nConfidence Intervals ({result['confidence_intervals']['confidence_level']*100:.0f}%):\n"
+            result_text += f"  Intercept: [{result['confidence_intervals']['intercept'][0]:.4f}, {result['confidence_intervals']['intercept'][1]:.4f}]\n"
+            for i, ci in enumerate(result['confidence_intervals']['slopes']):
+                result_text += f"  Slope {i+1}: [{ci[0]:.4f}, {ci[1]:.4f}]\n"
+        
+        if include_diagnostics and "diagnostics" in result:
+            result_text += f"\nDiagnostics:\n"
+            if "durbin_watson" in result['diagnostics']:
+                result_text += f"  Durbin-Watson: {result['diagnostics']['durbin_watson']:.4f}\n"
+        
+        result_text += f"\n{result['interpretation']}"
+        
+        if result['warnings']:
+            result_text += f"\n\nWarnings:\n"
+            for warning in result['warnings']:
+                result_text += f"  • {warning}\n"
+        
+        return CallToolResult(
+            content=[TextContent(type="text", text=result_text)],
+            isError=False,
+        )
+        
+    except ValueError as e:
+        logger.error(f"Validation error: {e}")
+        return CallToolResult(
+            content=[TextContent(type="text", text=f"Error: {str(e)}")],
+            isError=True,
+        )
+
+
+async def handle_polynomial_regression(arguments: Any) -> CallToolResult:
+    """Handle polynomial_regression tool calls."""
+    x = arguments.get("x")
+    y = arguments.get("y")
+    degree = arguments.get("degree", 2)
+    auto_select_degree = arguments.get("auto_select_degree", False)
+    
+    if x is None or y is None:
+        return CallToolResult(
+            content=[TextContent(type="text", text="Missing required parameters 'x' and 'y'")],
+            isError=True,
+        )
+    
+    try:
+        logger.info(f"Performing polynomial regression (degree={degree})")
+        result = polynomial_regression(x, y, degree, auto_select_degree)
+        
+        # Format output
+        result_text = f"Polynomial Regression Analysis:\n\n"
+        result_text += f"Degree: {result['degree']}\n"
+        result_text += f"Equation: {result['equation']}\n\n"
+        
+        result_text += f"Model Statistics:\n"
+        result_text += f"  R²: {result['r_squared']:.4f}\n"
+        result_text += f"  Adjusted R²: {result['adj_r_squared']:.4f}\n"
+        result_text += f"  RMSE: {result['rmse']:.4f}\n"
+        result_text += f"  Goodness of Fit: {result['goodness_of_fit']}\n"
+        
+        if result['turning_points']:
+            result_text += f"\nTurning Points:\n"
+            for tp in result['turning_points']:
+                result_text += f"  {tp['type'].capitalize()} at x={tp['x']:.2f}, y={tp['y']:.2f}\n"
+        
+        if result['optimal_x'] is not None:
+            result_text += f"\nOptimal Point:\n"
+            result_text += f"  x = {result['optimal_x']:.2f}\n"
+            result_text += f"  y = {result['optimal_y']:.2f}\n"
+        
+        result_text += f"\n{result['interpretation']}"
+        
+        return CallToolResult(
+            content=[TextContent(type="text", text=result_text)],
+            isError=False,
+        )
+        
+    except ValueError as e:
+        logger.error(f"Validation error: {e}")
+        return CallToolResult(
+            content=[TextContent(type="text", text=f"Error: {str(e)}")],
+            isError=True,
+        )
+
+
+async def handle_residual_analysis(arguments: Any) -> CallToolResult:
+    """Handle residual_analysis tool calls."""
+    actual = arguments.get("actual")
+    predicted = arguments.get("predicted")
+    x_values = arguments.get("x_values")
+    
+    if actual is None or predicted is None:
+        return CallToolResult(
+            content=[TextContent(type="text", text="Missing required parameters 'actual' and 'predicted'")],
+            isError=True,
+        )
+    
+    try:
+        logger.info("Performing residual analysis")
+        result = residual_analysis(actual, predicted, x_values)
+        
+        # Format output
+        result_text = f"Residual Analysis:\n\n"
+        
+        result_text += f"Statistical Tests:\n"
+        for test_name, test_result in result['tests'].items():
+            result_text += f"\n{test_name.replace('_', ' ').title()}:\n"
+            if 'conclusion' in test_result:
+                result_text += f"  {test_result['conclusion']}\n"
+                if 'p_value' in test_result:
+                    result_text += f"  p-value: {test_result['p_value']:.4f}\n"
+            elif 'error' in test_result or 'note' in test_result:
+                result_text += f"  {test_result.get('error', test_result.get('note'))}\n"
+        
+        result_text += f"\nOutliers:\n"
+        if result['outliers']['count'] == 0:
+            result_text += f"  None detected\n"
+        else:
+            result_text += f"  {result['outliers']['count']} outlier(s) detected\n"
+            for outlier in result['outliers']['values'][:5]:  # Show first 5
+                result_text += f"    Index {outlier['index']}: residual={outlier['residual']:.4f}, standardized={outlier['standardized']:.2f}\n"
+        
+        if result['patterns_detected']:
+            result_text += f"\nPatterns Detected:\n"
+            for pattern in result['patterns_detected']:
+                result_text += f"  • {pattern}\n"
+        
+        result_text += f"\n{result['overall_assessment']}"
+        
+        if result['recommendations']:
+            result_text += f"\n\nRecommendations:\n"
+            for rec in result['recommendations']:
+                result_text += f"  • {rec}\n"
+        
+        return CallToolResult(
+            content=[TextContent(type="text", text=result_text)],
+            isError=False,
+        )
+        
+    except ValueError as e:
+        logger.error(f"Validation error: {e}")
+        return CallToolResult(
+            content=[TextContent(type="text", text=f"Error: {str(e)}")],
+            isError=True,
+        )
+
+
+async def handle_prediction_with_intervals(arguments: Any) -> CallToolResult:
+    """Handle prediction_with_intervals tool calls."""
+    model = arguments.get("model")
+    x_new = arguments.get("x_new")
+    confidence_level = arguments.get("confidence_level", 0.95)
+    
+    if model is None or x_new is None:
+        return CallToolResult(
+            content=[TextContent(type="text", text="Missing required parameters 'model' and 'x_new'")],
+            isError=True,
+        )
+    
+    try:
+        logger.info(f"Generating predictions for {len(x_new)} new values")
+        result = prediction_with_intervals(model, x_new, confidence_level)
+        
+        # Format output
+        result_text = f"Predictions with Intervals:\n\n"
+        result_text += f"Confidence Level: {result['confidence_level']*100:.0f}%\n"
+        result_text += f"Reliability: {result['reliability'].upper()}\n"
+        
+        if result['extrapolation_warning']:
+            result_text += f"⚠ Warning: Some predictions may involve extrapolation\n"
+        
+        result_text += f"\nPredictions:\n"
+        for i, pred in enumerate(result['predictions'], 1):
+            result_text += f"\n{i}. {pred['interpretation']}\n"
+            result_text += f"   Prediction Interval: [{pred['prediction_interval'][0]:.2f}, {pred['prediction_interval'][1]:.2f}]\n"
+        
+        return CallToolResult(
+            content=[TextContent(type="text", text=result_text)],
+            isError=False,
+        )
+        
+    except ValueError as e:
+        logger.error(f"Validation error: {e}")
+        return CallToolResult(
+            content=[TextContent(type="text", text=f"Error: {str(e)}")],
+            isError=True,
+        )
+
+
+async def handle_multivariate_regression(arguments: Any) -> CallToolResult:
+    """Handle multivariate_regression tool calls."""
+    X = arguments.get("X")
+    y = arguments.get("y")
+    variable_names = arguments.get("variable_names")
+    standardize = arguments.get("standardize", False)
+    
+    if X is None or y is None:
+        return CallToolResult(
+            content=[TextContent(type="text", text="Missing required parameters 'X' and 'y'")],
+            isError=True,
+        )
+    
+    try:
+        logger.info("Performing multivariate regression")
+        result = multivariate_regression(X, y, variable_names, standardize)
+        
+        # Format output
+        result_text = f"Multivariate Regression Analysis:\n\n"
+        result_text += f"Equation:\n  {result['coefficients']['equation']}\n\n"
+        
+        result_text += f"Model Statistics:\n"
+        result_text += f"  R²: {result['r_squared']:.4f}\n"
+        result_text += f"  Adjusted R²: {result['adj_r_squared']:.4f}\n"
+        
+        result_text += f"\nVariable Importance (sorted by effect size):\n"
+        for var in result['variable_importance']:
+            result_text += f"  {var['variable']}: {var['coefficient']:.4f}"
+            if var['significance']:
+                result_text += f" {var['significance']}"
+            if var['p_value'] is not None:
+                result_text += f" (p={var['p_value']:.3f})"
+            result_text += "\n"
+        
+        if result['vif']:
+            result_text += f"\nVariance Inflation Factors (VIF):\n"
+            for var, vif in result['vif'].items():
+                if vif is not None:
+                    result_text += f"  {var}: {vif:.2f}\n"
+            result_text += f"\nMulticollinearity: {result['multicollinearity']}\n"
+        
+        result_text += f"\n{result['interpretation']}"
+        
+        return CallToolResult(
+            content=[TextContent(type="text", text=result_text)],
+            isError=False,
+        )
+        
+    except ValueError as e:
+        logger.error(f"Validation error: {e}")
+        return CallToolResult(
+            content=[TextContent(type="text", text=f"Error: {str(e)}")],
             isError=True,
         )
 

@@ -30,6 +30,12 @@ Dedicated statistical analysis tools:
   - **Change Point Detection**: Detect process upsets, modifications, and regime changes
   - **Rate of Change**: Monitor acceleration/deceleration for safety and startup monitoring
   - **Rolling Statistics**: Continuous windowed statistics for SCADA displays
+- **Regression Analysis**: 5 comprehensive tools for predictive modeling and equipment performance
+  - **Linear Regression**: Simple and multiple regression with diagnostics (R², RMSE, confidence intervals, Durbin-Watson)
+  - **Polynomial Regression**: Fit non-linear curves (degree 2-6) with turning points and optimization
+  - **Residual Analysis**: Validate model assumptions (normality, autocorrelation, heteroscedasticity)
+  - **Prediction with Intervals**: Generate forecasts with confidence and prediction intervals
+  - **Multivariate Regression**: Multiple independent variables with VIF for multicollinearity detection
 - **Signal Processing**: 6 comprehensive tools for vibration monitoring and electrical analysis
   - **FFT Analysis**: Frequency domain analysis for bearing defects, motor faults, and gear mesh
   - **Power Spectral Density**: Energy distribution across frequencies for vibration and noise
@@ -212,6 +218,16 @@ Once configured, you can interact with the server through Claude:
 ```
 
 **For detailed time series documentation and industrial use cases, see [TIME_SERIES_TOOLS.md](TIME_SERIES_TOOLS.md)**
+
+### Regression Analysis (Stats Server)
+```
+"Perform linear regression on flow rates [100, 150, 200, 250] vs power [45, 62, 82, 105]"
+"Fit a polynomial curve to this compressor performance data"
+"Analyze residuals to check if my regression model is valid"
+"Predict pump power consumption at 225 m³/h with confidence intervals"
+"Model chiller efficiency with load, ambient temperature, and condenser flow as variables"
+"Check for multicollinearity in my multivariate model"
+```
 
 ### Signal Processing Analysis (Stats Server)
 ```
@@ -1335,6 +1351,7 @@ Look for messages containing "fibonacci", "prime", or "mcp" to see connection at
 - `pydantic>=2.0.0` - Data validation and settings management
 - `python-dotenv>=1.0.0` - Environment variable management
 - `python-dateutil>=2.8.0` - Date and time calculations with timezone support
+- `scipy>=1.10.0` - Scientific computing library for statistical tests (Shapiro-Wilk, Durbin-Watson, VIF)
 
 All dependencies are automatically installed via `pip install -r requirements.txt`.
 
