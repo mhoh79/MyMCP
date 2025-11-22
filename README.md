@@ -281,7 +281,38 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 2. Configuration (Optional)
+### 2. Quick Start - HTTP Mode
+
+Get started quickly with HTTP transport for web clients and remote access:
+
+```bash
+# 1. Copy example config (creates config.yaml if it doesn't exist)
+cp config.example.yaml config.yaml
+# Note: The launcher script will create this automatically if missing
+
+# 2. Start both servers in HTTP mode
+./start-http-servers.sh start
+
+# 3. Test connection
+curl http://localhost:8000/health
+
+# Expected response:
+# {"status":"ok","server":"math-server","uptime_seconds":1.23,"timestamp":"..."}
+```
+
+**What you get**:
+- Math server running on `http://localhost:8000`
+- Stats server running on `http://localhost:8001`
+- REST API with JSON-RPC 2.0 protocol
+- Health checks, metrics, and SSE streaming
+- Ready for HTTP clients, web apps, and Codespaces
+
+**Next steps**:
+- Test the API: See [Client Connection Examples](#-client-connection-examples)
+- Configure security: See [Configuration Reference](#4-configuration-reference)
+- Deploy to Codespaces: See [GitHub Codespaces Setup](#-github-codespaces-setup)
+
+### 3. Configuration (Optional)
 
 The servers support YAML-based configuration with environment variable overrides. By default, servers run with sensible defaults, but you can customize settings using a config file.
 
@@ -349,7 +380,7 @@ MCP_LOG_LEVEL=DEBUG python src/stats_server/server.py --config config.yaml
 python src/math_server/server.py
 ```
 
-### 3. Security Configuration (Optional)
+### 4. Security Configuration (Optional)
 
 The servers include comprehensive security features that can be enabled via configuration. See [SECURITY.md](SECURITY.md) for detailed documentation.
 
@@ -384,7 +415,7 @@ export MCP_RATE_LIMIT_RPM=60
 
 **Important**: Always use strong API keys and HTTPS in production. See [SECURITY.md](SECURITY.md) for best practices.
 
-### 4. Configuration Reference
+### 5. Configuration Reference
 
 Complete reference for all configuration options in `config.yaml`:
 
@@ -485,7 +516,7 @@ export MCP_LOG_LEVEL=DEBUG
 2. Configuration file (`config.yaml`)
 3. Default values (lowest priority)
 
-### 5. Test the Servers
+### 6. Test the Servers
 
 #### Option A: Quick Start with Launcher Scripts (HTTP Mode)
 
@@ -660,7 +691,7 @@ The repository includes pre-configured VS Code launch configurations in `.vscode
 - Verify the file you're editing is in the `src/` directory
 - Try manually restarting the server
 
-### 6. Configure with Claude Desktop
+### 7. Configure with Claude Desktop
 
 Add **both servers** to Claude Desktop's configuration file:
 
@@ -720,7 +751,7 @@ To use a configuration file with Claude Desktop, add the `--config` argument:
 }
 ```
 
-### 5. Restart Claude Desktop
+### 8. Restart Claude Desktop
 
 Completely quit Claude Desktop and restart it. Both servers should now be available with their respective tools.
 
@@ -1182,7 +1213,10 @@ asyncio.run(call_mcp_tool())
 
 ### JavaScript/Node.js Client Example
 
+**Installation**: `npm install axios`
+
 ```javascript
+// Node.js with CommonJS
 const axios = require('axios');
 
 async function callMCPTool() {
@@ -1278,6 +1312,8 @@ curl http://localhost:8000/metrics
 ```
 
 ### Server-Sent Events (SSE) Example
+
+**Installation**: `pip install httpx httpx-sse`
 
 ```python
 import httpx
@@ -2591,8 +2627,9 @@ openssl rand -hex 32
 # Python
 python -c "import secrets; print(secrets.token_urlsafe(32))"
 
-# PowerShell
--join ((48..57) + (65..90) + (97..122) | Get-Random -Count 32 | ForEach-Object {[char]$_})
+# PowerShell (using .NET cryptographic random generator)
+Add-Type -AssemblyName 'System.Web'
+[System.Web.Security.Membership]::GeneratePassword(32, 8)
 ```
 
 ### HTTPS in Production
@@ -2772,7 +2809,10 @@ Comprehensive troubleshooting guide for common issues with MCP servers.
 4. **Verify port not in use by another process**:
    ```bash
    # Kill process on port 8000 (if needed)
-   lsof -ti:8000 | xargs kill -9  # Mac/Linux
+   # Try graceful shutdown first
+   lsof -ti:8000 | xargs kill      # Mac/Linux (SIGTERM)
+   # If process doesn't stop, force kill as last resort
+   lsof -ti:8000 | xargs kill -9   # Mac/Linux (SIGKILL)
    ```
 
 #### CORS Errors in Browser
