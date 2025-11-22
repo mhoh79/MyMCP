@@ -82,8 +82,35 @@ function Test-Command {
 # Function to check if a port is in use
 function Test-PortInUse {
     param([int]$Port)
-    $connections = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
-    return $null -ne $connections
+    
+    # Try Windows-specific command first
+    if (Test-Command "Get-NetTCPConnection") {
+        $connections = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
+        return $null -ne $connections
+    }
+    
+    # Fallback for Linux/Mac using netstat or lsof
+    try {
+        if (Test-Command "lsof") {
+            $result = & lsof -Pi :$Port -sTCP:LISTEN -t 2>$null
+            return $LASTEXITCODE -eq 0 -and $result
+        }
+        elseif (Test-Command "netstat") {
+            $result = & netstat -tuln 2>$null | Select-String ":$Port "
+            return $null -ne $result
+        }
+        else {
+            # Last resort: try to bind to the port using Python
+            $pythonCmd = if (Test-Command python) { "python" } else { "python3" }
+            $testScript = "import socket; s = socket.socket(socket.AF_INET, socket.SOCK_STREAM); s.bind(('', $Port)); s.close()"
+            & $pythonCmd -c $testScript 2>$null
+            return $LASTEXITCODE -ne 0
+        }
+    }
+    catch {
+        # If all else fails, assume port is available
+        return $false
+    }
 }
 
 # Function to check if a process is running
@@ -219,12 +246,20 @@ function Start-Servers {
     Write-Host ""
     Write-Info "Starting Math Server on port $MathPort..."
     
-    $mathProcess = Start-Process -FilePath $pythonCmd `
-        -ArgumentList "src/math_server/server.py", "--transport", "http", "--host", "0.0.0.0", "--port", $MathPort, "--config", $ConfigFile `
-        -RedirectStandardOutput "logs/math_server.log" `
-        -RedirectStandardError "logs/math_server_error.log" `
-        -WindowStyle Hidden `
-        -PassThru
+    $startProcessParams = @{
+        FilePath = $pythonCmd
+        ArgumentList = "src/math_server/server.py", "--transport", "http", "--host", "0.0.0.0", "--port", $MathPort, "--config", $ConfigFile
+        RedirectStandardOutput = "logs/math_server.log"
+        RedirectStandardError = "logs/math_server_error.log"
+        PassThru = $true
+    }
+    
+    # Add WindowStyle only on Windows
+    if ($IsWindows -or $null -eq $IsWindows) {
+        $startProcessParams['WindowStyle'] = 'Hidden'
+    }
+    
+    $mathProcess = Start-Process @startProcessParams
 
     Start-Sleep -Seconds 2
 
@@ -241,12 +276,20 @@ function Start-Servers {
     Write-Host ""
     Write-Info "Starting Stats Server on port $StatsPort..."
     
-    $statsProcess = Start-Process -FilePath $pythonCmd `
-        -ArgumentList "src/stats_server/server.py", "--transport", "http", "--host", "0.0.0.0", "--port", $StatsPort, "--config", $ConfigFile `
-        -RedirectStandardOutput "logs/stats_server.log" `
-        -RedirectStandardError "logs/stats_server_error.log" `
-        -WindowStyle Hidden `
-        -PassThru
+    $startProcessParams = @{
+        FilePath = $pythonCmd
+        ArgumentList = "src/stats_server/server.py", "--transport", "http", "--host", "0.0.0.0", "--port", $StatsPort, "--config", $ConfigFile
+        RedirectStandardOutput = "logs/stats_server.log"
+        RedirectStandardError = "logs/stats_server_error.log"
+        PassThru = $true
+    }
+    
+    # Add WindowStyle only on Windows
+    if ($IsWindows -or $null -eq $IsWindows) {
+        $startProcessParams['WindowStyle'] = 'Hidden'
+    }
+    
+    $statsProcess = Start-Process @startProcessParams
 
     Start-Sleep -Seconds 2
 
@@ -308,35 +351,35 @@ function Stop-Servers {
     $stopped = 0
     foreach ($entry in $pids.GetEnumerator()) {
         $name = $entry.Key
-        $pid = $entry.Value
+        $procId = $entry.Value
 
-        if (Test-ProcessRunning $pid) {
-            Write-Info "Stopping $name (PID: $pid)..."
+        if (Test-ProcessRunning $procId) {
+            Write-Info "Stopping $name (PID: $procId)..."
             
             try {
                 # Try graceful shutdown first
-                Stop-Process -Id $pid -ErrorAction Stop
+                Stop-Process -Id $procId -ErrorAction Stop
                 
                 # Wait up to 10 seconds for graceful shutdown
                 $count = 0
-                while ((Test-ProcessRunning $pid) -and ($count -lt 10)) {
+                while ((Test-ProcessRunning $procId) -and ($count -lt 10)) {
                     Start-Sleep -Seconds 1
                     $count++
                 }
                 
                 # Force kill if still running
-                if (Test-ProcessRunning $pid) {
+                if (Test-ProcessRunning $procId) {
                     Write-Warning-Custom "Forcing $name to stop..."
-                    Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue
+                    Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
                     Start-Sleep -Seconds 1
                 }
                 
-                if (-not (Test-ProcessRunning $pid)) {
+                if (-not (Test-ProcessRunning $procId)) {
                     Write-Status "$name stopped successfully"
                     $stopped++
                 }
                 else {
-                    Write-Error-Custom "Failed to stop $name (PID: $pid)"
+                    Write-Error-Custom "Failed to stop $name (PID: $procId)"
                 }
             }
             catch {
@@ -344,7 +387,7 @@ function Stop-Servers {
             }
         }
         else {
-            Write-Warning-Custom "$name (PID: $pid) is not running"
+            Write-Warning-Custom "$name (PID: $procId) is not running"
         }
     }
 
@@ -371,14 +414,14 @@ function Get-ServerStatus {
     $running = 0
     foreach ($entry in $pids.GetEnumerator()) {
         $name = $entry.Key
-        $pid = $entry.Value
+        $procId = $entry.Value
 
-        if (Test-ProcessRunning $pid) {
-            Write-Status "$name is running (PID: $pid)"
+        if (Test-ProcessRunning $procId) {
+            Write-Status "$name is running (PID: $procId)"
             $running++
         }
         else {
-            Write-Error-Custom "$name is not running (PID: $pid - stale)"
+            Write-Error-Custom "$name is not running (PID: $procId - stale)"
         }
     }
 
