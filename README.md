@@ -281,51 +281,789 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 2. API Key Setup (Optional but Recommended)
+### 2. Understanding GitHub Secrets and API Keys
 
-For secure deployments, generate and configure an API key using the automated setup script:
+Before diving into setup, it's important to understand how API keys flow through different environments:
 
-#### Quick Setup (Local Development)
-```powershell
-# Windows PowerShell - Create .env file with generated API key
-.\setup-api-key.ps1
+#### API Key Flow: GitHub Secrets → Environment → Application
 
-# Or set as Windows environment variable (persistent)
-.\setup-api-key.ps1 -Method envvar
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     API Key Flow Diagram                        │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  GitHub (Cloud)                                                 │
+│  ┌────────────────────────────────────────────────────────────┐│
+│  │ Repository Secrets (Settings → Secrets)                    ││
+│  │ • Used by: GitHub Actions (CI/CD)                          ││
+│  │ • Scope: All workflows in repository                       ││
+│  │ • Example: MCP_API_KEY for test workflows                  ││
+│  └────────────────────────────────────────────────────────────┘│
+│                              ↓                                  │
+│  ┌────────────────────────────────────────────────────────────┐│
+│  │ Codespaces Secrets (Settings → Codespaces)                 ││
+│  │ • Used by: GitHub Codespaces (dev environments)            ││
+│  │ • Scope: All Codespaces for selected repositories          ││
+│  │ • Example: MCP_API_KEY for development/testing             ││
+│  └────────────────────────────────────────────────────────────┘│
+│                              ↓                                  │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  Local Machine / Codespace / GitHub Actions Runner             │
+│  ┌────────────────────────────────────────────────────────────┐│
+│  │ Environment Variables                                       ││
+│  │ • Loaded at runtime                                         ││
+│  │ • Sources: .env file, system env vars, GitHub Secrets      ││
+│  │ • Example: export MCP_API_KEY="sk_mcp_..."                 ││
+│  └────────────────────────────────────────────────────────────┘│
+│                              ↓                                  │
+│  ┌────────────────────────────────────────────────────────────┐│
+│  │ Python Application (MCP Server)                             ││
+│  │ • Reads: os.environ.get("MCP_API_KEY")                     ││
+│  │ • Validates: Minimum 16 characters                          ││
+│  │ • Uses: Authentication middleware                           ││
+│  └────────────────────────────────────────────────────────────┘│
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-#### GitHub Codespaces Setup
-```powershell
-# Get instructions for configuring Codespaces secrets
-.\setup-api-key.ps1 -Environment codespace
+#### Key Differences Between Secret Types
 
-# Or setup both local and Codespaces
+| Secret Type | Purpose | Where Set | Used By | Rebuild Required |
+|-------------|---------|-----------|---------|------------------|
+| **Repository Secrets** | CI/CD, GitHub Actions | Repository Settings → Secrets → Actions | Workflows (.github/workflows/*.yml) | No (available immediately) |
+| **Codespaces Secrets** | Development in cloud | Repository/User Settings → Codespaces | Codespace containers | **Yes** (must rebuild) |
+| **Local `.env` File** | Local development | Project root (gitignored) | Local Python process | No (loaded at startup) |
+| **Environment Variables** | Any environment | System/shell configuration | Any process in session | No (set before running) |
+
+#### When to Use Each Type
+
+**Use Repository Secrets when:**
+- Running automated tests in GitHub Actions
+- Deploying from GitHub Actions workflows
+- Need secrets available to all workflows
+
+**Use Codespaces Secrets when:**
+- Developing in GitHub Codespaces
+- Need consistent keys across all your Codespaces
+- Working on multiple repositories with same keys
+
+**Use Local `.env` File when:**
+- Developing on your local machine
+- Testing with different keys quickly
+- Don't want to modify system environment
+
+**Use Environment Variables when:**
+- One-time testing with specific values
+- Shell scripts need access to keys
+- CI/CD systems (Jenkins, GitLab, etc.)
+
+### 3. GitHub Secrets Setup Guide
+
+This section explains how to configure GitHub Secrets for both Codespaces (development) and Repository Secrets (CI/CD).
+
+#### Step 1: Generate a Secure API Key
+
+First, generate a cryptographically secure API key using one of these methods:
+
+**Option A: Automated Script (Recommended)**
+```powershell
+# Windows PowerShell - Generates key and copies to clipboard
+.\setup-api-key.ps1
+
+# You'll see output like:
+# ✓ API key generated successfully
+# Generated API Key:
+# sk_mcp_AbCdEfGhIjKlMnOpQrStUvWxYz123456
+# ✓ API key copied to clipboard!
+```
+
+**Option B: Command Line**
+```bash
+# Python (works on all platforms)
+python -c "import secrets; print('sk_mcp_' + secrets.token_urlsafe(24))"
+
+# Linux/Mac with OpenSSL
+echo "sk_mcp_$(openssl rand -base64 24 | tr -d '/+=' | cut -c1-32)"
+
+# PowerShell
+$bytes = [byte[]]::new(24); [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes); "sk_mcp_$([Convert]::ToBase64String($bytes).Replace('+','-').Replace('/','_').TrimEnd('='))"
+```
+
+**Save this key securely** - you'll need it in the next steps. Never commit this key to version control!
+
+#### Step 2: Configure Codespaces Secrets (For Development)
+
+Codespaces Secrets make your API key available in all your GitHub Codespaces.
+
+**2.1 Navigate to Codespaces Secrets**
+
+Go to: **[https://github.com/settings/codespaces](https://github.com/settings/codespaces)**
+
+Or manually navigate:
+1. Click your profile photo (top-right)
+2. Click **Settings**
+3. In the left sidebar, click **Codespaces**
+4. Click **New secret** button
+
+**2.2 Create the Secret**
+
+Fill in the form:
+- **Name**: `MCP_API_KEY` (exact name, case-sensitive)
+- **Value**: Paste the API key you generated (e.g., `sk_mcp_AbCdEfGhIjKlMnOpQrStUvWxYz123456`)
+- **Repository access**: Select repositories that need this secret
+  - Choose **Selected repositories** and pick `mhoh79/MyMCP`
+  - Or choose **All repositories** if you want it everywhere (less secure)
+
+Click **Add secret**
+
+**2.3 Rebuild Your Codespace (IMPORTANT)**
+
+⚠️ **Secrets are only available after rebuilding the container!**
+
+If you have an existing Codespace:
+1. Open your Codespace
+2. Press `Ctrl+Shift+P` (or `Cmd+Shift+P` on Mac)
+3. Type: `Codespaces: Rebuild Container`
+4. Press Enter
+5. Wait for rebuild to complete (~2-3 minutes)
+
+Alternatively, create a new Codespace to automatically get the secret.
+
+**2.4 Verify Secret is Loaded**
+
+After rebuild, open terminal in Codespace and run:
+```bash
+echo $MCP_API_KEY
+```
+
+You should see your API key. If you see nothing, the secret wasn't loaded correctly.
+
+**Troubleshooting:**
+- Check secret name is exactly `MCP_API_KEY`
+- Verify repository has access to the secret
+- Make sure you rebuilt the container (not just restarted)
+- Try creating a fresh Codespace
+
+#### Step 3: Configure Repository Secrets (For GitHub Actions)
+
+Repository Secrets make your API key available to GitHub Actions workflows for automated testing.
+
+**3.1 Navigate to Repository Secrets**
+
+Go to your repository: **https://github.com/mhoh79/MyMCP**
+
+Then navigate:
+1. Click **Settings** tab (requires repository admin access)
+2. In left sidebar, expand **Secrets and variables**
+3. Click **Actions**
+4. Click **New repository secret** button
+
+Or directly: **https://github.com/mhoh79/MyMCP/settings/secrets/actions**
+
+**3.2 Create the Secret**
+
+Fill in the form:
+- **Name**: `MCP_API_KEY`
+- **Secret**: Paste your generated API key
+
+Click **Add secret**
+
+**3.3 Secret is Immediately Available**
+
+Unlike Codespaces Secrets, Repository Secrets are immediately available to workflows. No rebuild needed!
+
+**3.4 Verify in Workflow**
+
+Repository Secrets are automatically used by the test workflow (`.github/workflows/test-http-client.yml`):
+
+```yaml
+- name: Run authentication tests
+  env:
+    MCP_API_KEY: ${{ secrets.MCP_API_KEY }}  # ← Secret injected here
+  run: |
+    pytest tests/test_http_client.py -v -k "auth"
+```
+
+To verify it's working:
+1. Go to **Actions** tab in your repository
+2. Find the latest workflow run
+3. Check that authentication tests pass
+
+#### Step 4: Test Your Setup
+
+**In Codespaces:**
+```bash
+# Verify secret is loaded
+echo "Secret loaded: $([ -n "$MCP_API_KEY" ] && echo 'Yes ✓' || echo 'No ✗')"
+
+# Start servers with authentication
+export MCP_AUTH_ENABLED=true
+./start-http-servers.sh start
+
+# Test authenticated request
+curl -H "Authorization: Bearer $MCP_API_KEY" \
+  https://$(echo $CODESPACE_NAME)-8000.app.github.dev/health
+
+# Expected: {"status":"ok",...}
+```
+
+**In GitHub Actions:**
+- Push a commit or manually trigger workflow
+- Check **Actions** tab for test results
+- Authentication tests should pass with your Repository Secret
+
+#### Common Issues and Solutions
+
+**Issue: "Secret not found" in Codespace**
+- Solution: Rebuild container (see Step 2.3)
+- Make sure secret name is exactly `MCP_API_KEY`
+
+**Issue: Authentication tests fail in GitHub Actions**
+- Solution: Check Repository Secret is set correctly
+- Verify secret name matches `${{ secrets.MCP_API_KEY }}`
+
+**Issue: Can't access Repository Settings**
+- Solution: Need admin permissions for the repository
+- Ask repository owner to add the secret
+
+**Issue: Secret shows in logs**
+- Solution: GitHub automatically masks secrets in logs
+- If you see `***`, that's correct behavior
+
+### 4. Local Development Setup
+
+This section covers setting up API keys for local development on your machine (outside of Codespaces).
+
+#### Option A: Using `setup-api-key.ps1` Script (Windows/PowerShell)
+
+The automated script handles everything for you:
+
+**Quick Setup with .env File:**
+```powershell
+# Navigate to project directory
+cd path/to/MyMCP
+
+# Run the setup script
+.\setup-api-key.ps1
+
+# Script will:
+# ✓ Generate secure API key
+# ✓ Copy to clipboard
+# ✓ Create/update .env file
+# ✓ Verify .env is in .gitignore
+# ✓ Install python-dotenv if needed
+```
+
+**Setup with Environment Variable:**
+```powershell
+# Set as persistent Windows environment variable
+.\setup-api-key.ps1 -Method envvar
+
+# Requires restart of terminal/PowerShell to take effect
+```
+
+**Setup for Both Local and Codespaces:**
+```powershell
+# Get both local setup AND Codespaces instructions
 .\setup-api-key.ps1 -Environment both
 ```
 
-**What the script does:**
-- ✅ Generates cryptographically secure 32-character API keys with `sk_mcp_` prefix
-- ✅ Automatically copies key to clipboard
-- ✅ Creates/updates `.env` file or sets environment variable
-- ✅ Verifies `.env` is in `.gitignore`
-- ✅ Installs `python-dotenv` if needed
-- ✅ Provides GitHub Codespaces configuration instructions
-- ✅ Displays verification and testing commands
-- ✅ Includes security best practices reminders
+#### Option B: Manual .env File Setup
 
-**Manual Setup (Alternative):**
+If you prefer manual setup or are on Linux/Mac:
+
+**Step 1: Copy Template**
 ```bash
-# Copy example configuration
+# Copy the example file
 cp .env.example .env
-
-# Generate API key manually
-python -c "import secrets; print('sk_mcp_' + secrets.token_urlsafe(24))"
-
-# Edit .env and set MCP_API_KEY to your generated key
-# Then enable authentication: MCP_AUTH_ENABLED=true
 ```
 
-### 3. Quick Start - HTTP Mode
+**Step 2: Generate API Key**
+```bash
+# Python method (works everywhere)
+python -c "import secrets; print('sk_mcp_' + secrets.token_urlsafe(24))"
+
+# Linux/Mac with OpenSSL
+echo "sk_mcp_$(openssl rand -base64 24 | tr -d '/+=' | cut -c1-32)"
+```
+
+**Step 3: Edit .env File**
+Open `.env` in your text editor and update:
+```bash
+# Authentication Configuration
+MCP_AUTH_ENABLED=true
+MCP_API_KEY=sk_mcp_YourGeneratedKeyHere123456789012
+
+# Server Configuration (optional)
+MCP_MATH_PORT=8000
+MCP_STATS_PORT=8001
+
+# Rate Limiting (optional)
+MCP_RATE_LIMIT_ENABLED=false
+MCP_RATE_LIMIT_RPM=60
+
+# Logging
+MCP_LOG_LEVEL=INFO
+```
+
+**Step 4: Verify .env is Gitignored**
+```bash
+# Check .gitignore contains .env
+grep "^\.env$" .gitignore
+
+# If not found, add it
+echo ".env" >> .gitignore
+```
+
+**Step 5: Install python-dotenv**
+```bash
+# Needed to load .env file
+pip install python-dotenv
+
+# Already included in requirements.txt
+```
+
+#### Option C: System Environment Variables
+
+For system-wide configuration or CI/CD:
+
+**Linux/Mac (temporary, current session):**
+```bash
+export MCP_API_KEY="sk_mcp_YourKeyHere123456789012"
+export MCP_AUTH_ENABLED=true
+```
+
+**Linux/Mac (permanent, user profile):**
+```bash
+# Add to ~/.bashrc or ~/.zshrc
+echo 'export MCP_API_KEY="sk_mcp_YourKeyHere"' >> ~/.bashrc
+echo 'export MCP_AUTH_ENABLED=true' >> ~/.bashrc
+
+# Reload shell config
+source ~/.bashrc
+```
+
+**Windows (temporary, current session):**
+```powershell
+$env:MCP_API_KEY="sk_mcp_YourKeyHere123456789012"
+$env:MCP_AUTH_ENABLED="true"
+```
+
+**Windows (permanent, user level):**
+```powershell
+# PowerShell (requires admin)
+[System.Environment]::SetEnvironmentVariable("MCP_API_KEY", "sk_mcp_YourKeyHere", "User")
+[System.Environment]::SetEnvironmentVariable("MCP_AUTH_ENABLED", "true", "User")
+
+# Or use the setup script
+.\setup-api-key.ps1 -Method envvar
+```
+
+#### Comparison: .env vs Environment Variables
+
+| Feature | .env File | Environment Variables |
+|---------|-----------|----------------------|
+| **Ease of Setup** | ✅ Very easy (copy & edit) | ⚠️ Varies by OS |
+| **Portability** | ✅ Project-specific | ❌ System-wide |
+| **Version Control** | ✅ Template (.env.example) | ❌ Not tracked |
+| **Security** | ⚠️ Must gitignore | ✅ Not in filesystem |
+| **Quick Changes** | ✅ Edit file, restart app | ⚠️ Set var, restart app |
+| **CI/CD Friendly** | ❌ Not for CI/CD | ✅ Standard for CI/CD |
+| **Multiple Projects** | ✅ Different .env per project | ⚠️ Shared across projects |
+| **Team Sharing** | ✅ Share .env.example | ⚠️ Document manually |
+| **Requires python-dotenv** | ✅ Yes | ❌ No |
+
+**Recommendation:**
+- **Local Development**: Use `.env` file (easiest for developers)
+- **Codespaces**: Use Codespaces Secrets (automatic across environments)
+- **GitHub Actions**: Use Repository Secrets (secure CI/CD)
+- **Production**: Use environment variables or secret management service
+
+#### Testing Without Authentication
+
+For quick testing or development, you can disable authentication:
+
+**In .env file:**
+```bash
+MCP_AUTH_ENABLED=false
+# MCP_API_KEY can be empty or anything
+```
+
+**As environment variable:**
+```bash
+export MCP_AUTH_ENABLED=false
+python src/math_server/server.py --transport http
+```
+
+**In config.yaml:**
+```yaml
+authentication:
+  enabled: false
+```
+
+**Testing authenticated vs unauthenticated:**
+```bash
+# Without auth (should work if auth disabled)
+curl http://localhost:8000/health
+
+# With auth (always works, even if auth disabled)
+curl -H "Authorization: Bearer $MCP_API_KEY" http://localhost:8000/health
+
+# Wrong auth (should fail if auth enabled)
+curl -H "Authorization: Bearer wrong-key" http://localhost:8000/health
+# Expected: {"error": "Invalid or missing API key"}
+```
+
+#### Verifying Your Setup
+
+**Check environment variables are loaded:**
+```bash
+# See all MCP-related variables
+env | grep MCP
+
+# Or specifically
+echo $MCP_API_KEY
+echo $MCP_AUTH_ENABLED
+```
+
+**Test with Python:**
+```python
+# Quick test script
+import os
+from dotenv import load_dotenv
+
+# Load .env file
+load_dotenv()
+
+# Check variables
+api_key = os.getenv("MCP_API_KEY")
+auth_enabled = os.getenv("MCP_AUTH_ENABLED", "false").lower() == "true"
+
+print(f"API Key set: {bool(api_key)}")
+print(f"API Key length: {len(api_key) if api_key else 0}")
+print(f"Auth enabled: {auth_enabled}")
+```
+
+**Start server and test:**
+```bash
+# Start with environment variables
+python src/math_server/server.py --transport http
+
+# In another terminal, test
+curl -H "Authorization: Bearer $MCP_API_KEY" http://localhost:8000/health
+```
+
+### 5. Multi-Endpoint Architecture Explained
+
+The MCP servers support a dual-endpoint architecture that enables both **private development** and **public production** access patterns. Understanding this architecture helps you choose the right approach for your use case.
+
+#### Architecture Overview
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│                   Multi-Endpoint Architecture                         │
+├──────────────────────────────────────────────────────────────────────┤
+│                                                                       │
+│  ┌─────────────────────────────┐  ┌─────────────────────────────────┐│
+│  │     PRIVATE ENDPOINTS       │  │     PUBLIC ENDPOINTS             ││
+│  │  (Development/Testing)      │  │  (Production/Demo)               ││
+│  ├─────────────────────────────┤  ├─────────────────────────────────┤│
+│  │                             │  │                                  ││
+│  │ Visibility: Private         │  │ Visibility: Public               ││
+│  │ Auth: Disabled (default)    │  │ Auth: Required                   ││
+│  │ Access: localhost or        │  │ Access: Public URL               ││
+│  │         gh CLI port forward │  │                                  ││
+│  │                             │  │                                  ││
+│  │ Use Cases:                  │  │ Use Cases:                       ││
+│  │ • Rapid prototyping         │  │ • Production API                 ││
+│  │ • Local debugging           │  │ • Public demos                   ││
+│  │ • Internal testing          │  │ • Client integrations            ││
+│  │ • Dev without API keys      │  │ • Secure remote access           ││
+│  │                             │  │                                  ││
+│  │ Example URLs:               │  │ Example URLs:                    ││
+│  │ • Local: localhost:8000     │  │ • Codespaces (public):           ││
+│  │ • Codespaces (private):     │  │   https://...-9000.app.github.dev││
+│  │   Requires: gh codespace    │  │ • Production:                    ││
+│  │   ports forward 8000:8000   │  │   https://api.example.com        ││
+│  │                             │  │                                  ││
+│  │ Security Model:             │  │ Security Model:                  ││
+│  │ • Network isolation         │  │ • API key authentication         ││
+│  │ • Private by default        │  │ • Rate limiting                  ││
+│  │ • Fast iteration            │  │ • CORS restrictions              ││
+│  │                             │  │ • HTTPS required                 ││
+│  └─────────────────────────────┘  └─────────────────────────────────┘│
+│                                                                       │
+│  Both endpoint types serve the same MCP tools and API                │
+│  Configuration determines security posture and accessibility         │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+#### Endpoint Type Comparison
+
+| Aspect | Private Endpoints | Public Endpoints |
+|--------|------------------|------------------|
+| **Port (example)** | 8000, 8001 | 9000, 9001 |
+| **Network Access** | Localhost/private network | Internet-accessible |
+| **Authentication** | Optional (typically disabled) | Required (enforce with API keys) |
+| **Best For** | Development, debugging | Production, demos, APIs |
+| **Codespaces Visibility** | Private (port forward needed) | Public (direct URL access) |
+| **Configuration** | `config.dev.yaml` | `config.prod.yaml` |
+| **Rate Limiting** | Usually disabled | Recommended enabled |
+| **HTTPS** | Not required (HTTP OK) | Required (HTTPS only) |
+| **CORS** | Relaxed (localhost:*) | Restricted (specific origins) |
+| **Logging Level** | DEBUG | INFO or WARNING |
+
+#### Use Case: Private Endpoints (Development)
+
+**Scenario:** You're developing a new feature and need fast iteration cycles without dealing with authentication.
+
+**Configuration (config.dev.yaml):**
+```yaml
+server:
+  math:
+    host: "127.0.0.1"  # Localhost only
+    port: 8000
+  stats:
+    host: "127.0.0.1"
+    port: 8001
+  cors_origins:
+    - "http://localhost:*"
+
+authentication:
+  enabled: false  # No auth needed for local dev
+
+rate_limiting:
+  enabled: false  # No rate limits
+
+logging:
+  level: "DEBUG"  # Verbose logging
+```
+
+**Start Private Server:**
+```bash
+# Local machine
+python src/math_server/server.py --transport http --port 8000
+
+# Access locally
+curl http://localhost:8000/health
+```
+
+**In Codespaces (Private Ports):**
+```bash
+# Start server (binds to 0.0.0.0 but port is private by default)
+./start-http-servers.sh start
+
+# Option 1: Access from within Codespace
+curl http://localhost:8000/health
+
+# Option 2: Forward port to your local machine
+gh codespace ports forward 8000:8000 -c my-codespace-name
+
+# Then access locally
+curl http://localhost:8000/health
+```
+
+**Benefits:**
+- ✅ No API key management during development
+- ✅ Fast startup and testing
+- ✅ Easy debugging with verbose logs
+- ✅ Network isolated (secure by obscurity)
+
+**Limitations:**
+- ❌ Not accessible remotely
+- ❌ Not suitable for demos
+- ❌ No authentication practice
+
+#### Use Case: Public Endpoints (Production/Demo)
+
+**Scenario:** You want to demo your MCP server to a client or deploy it for production use.
+
+**Configuration (config.prod.yaml):**
+```yaml
+server:
+  math:
+    host: "0.0.0.0"  # All interfaces
+    port: 9000
+  stats:
+    host: "0.0.0.0"
+    port: 9001
+  cors_origins:
+    - "https://example.com"  # Specific origins only
+    - "https://*.app.github.dev"  # Codespaces
+
+authentication:
+  enabled: true  # Require API keys
+  api_key: "${MCP_API_KEY}"  # From environment
+
+rate_limiting:
+  enabled: true  # Prevent abuse
+  requests_per_minute: 60
+
+logging:
+  level: "INFO"  # Production logging
+```
+
+**Start Public Server:**
+```bash
+# Set up environment
+export MCP_AUTH_ENABLED=true
+export MCP_API_KEY="sk_mcp_your_secure_key"
+
+# Start server with production config
+python src/math_server/server.py --transport http --port 9000 --config config.prod.yaml
+```
+
+**In Codespaces (Public Ports):**
+```bash
+# Make sure Codespaces Secret is set (MCP_API_KEY)
+# Rebuild container if you just added the secret
+
+# Start with production config
+MCP_AUTH_ENABLED=true ./start-http-servers.sh start
+
+# Set port visibility to Public (in VS Code Ports panel)
+# Right-click port 9000 → Port Visibility → Public
+
+# Access from anywhere
+curl -H "Authorization: Bearer $MCP_API_KEY" \
+  https://your-codespace-9000.app.github.dev/health
+```
+
+**Benefits:**
+- ✅ Accessible from anywhere
+- ✅ Secure with authentication
+- ✅ Rate limited to prevent abuse
+- ✅ Production-ready
+
+**Limitations:**
+- ⚠️ Requires API key management
+- ⚠️ Must use HTTPS in production
+- ⚠️ Needs proper secret handling
+
+#### Port Forwarding with GitHub CLI (gh)
+
+For accessing private Codespaces ports from your local machine:
+
+**Prerequisites:**
+```bash
+# Install GitHub CLI
+# See: https://cli.github.com/
+
+# Authenticate
+gh auth login
+```
+
+**List Your Codespaces:**
+```bash
+gh codespace list
+
+# Output example:
+# NAME                       REPOSITORY      BRANCH  STATE    
+# jubilant-space-waddle-...  mhoh79/MyMCP    main    Running
+```
+
+**Forward Port:**
+```bash
+# Format: gh codespace ports forward <local-port>:<remote-port> -c <codespace-name>
+
+# Example: Forward Codespace port 8000 to local port 8000
+gh codespace ports forward 8000:8000 -c jubilant-space-waddle-5p4v997xqw5h555
+
+# Now access as if it were local
+curl http://localhost:8000/health
+```
+
+**Forward Multiple Ports:**
+```bash
+# Forward both math and stats servers
+gh codespace ports forward 8000:8000 -c my-codespace &
+gh codespace ports forward 8001:8001 -c my-codespace &
+
+# Access both servers locally
+curl http://localhost:8000/health  # Math server
+curl http://localhost:8001/health  # Stats server
+```
+
+**Stop Port Forwarding:**
+```bash
+# Press Ctrl+C in the terminal where forwarding is running
+# Or kill the process
+pkill -f "gh codespace ports forward"
+```
+
+#### Codespaces Dual-Endpoint Setup (Example)
+
+The `.devcontainer/devcontainer.json` can be configured to automatically start both private and public endpoints:
+
+```json
+{
+  "name": "MCP Development",
+  "image": "mcr.microsoft.com/devcontainers/python:3.12",
+  "forwardPorts": [8000, 8001, 9000, 9001],
+  "portsAttributes": {
+    "8000": {
+      "label": "Math Dev (Private)",
+      "visibility": "private"
+    },
+    "8001": {
+      "label": "Stats Dev (Private)",
+      "visibility": "private"
+    },
+    "9000": {
+      "label": "Math Prod (Public)",
+      "visibility": "public"
+    },
+    "9001": {
+      "label": "Stats Prod (Public)",
+      "visibility": "public"
+    }
+  },
+  "postCreateCommand": "pip install -r requirements.txt"
+}
+```
+
+#### Decision Guide: Which Endpoint Type Should I Use?
+
+**Use Private Endpoints when:**
+- 👨‍💻 Developing locally or in Codespaces
+- 🐛 Debugging or troubleshooting
+- 🧪 Running tests that don't need auth
+- 🔒 Want network isolation for security
+- ⚡ Need fast iteration without auth overhead
+
+**Use Public Endpoints when:**
+- 🌐 Deploying to production
+- 🎬 Demonstrating to clients
+- 🔗 Integrating with external clients
+- 🔐 Need authentication and rate limiting
+- 📊 Want to track usage metrics
+
+**Use Both Simultaneously when:**
+- 🏢 Testing production config in development
+- 🔄 Comparing authenticated vs unauthenticated behavior
+- 👥 Supporting multiple team workflows
+- 🎯 Validating security features before deployment
+
+#### Security Model Comparison
+
+**Private Endpoint Security:**
+- **Network Isolation**: Only accessible from localhost or via port forwarding
+- **No Authentication**: Typically auth is disabled for speed
+- **Trust Model**: Developer's machine is trusted environment
+- **Risk**: Low (not accessible from internet)
+
+**Public Endpoint Security:**
+- **API Authentication**: Every request validated with Bearer token
+- **Rate Limiting**: Prevent abuse and DoS attacks
+- **CORS Restrictions**: Only allowed origins can access
+- **HTTPS Required**: Encrypt all traffic in transit
+- **Monitoring**: Log and track all access
+- **Risk**: Medium to High (exposed to internet)
+
+**Best Practice:** Always test with public endpoints configured before deploying to production!
+
+### 6. Quick Start - HTTP Mode
 
 Get started quickly with HTTP transport for web clients and remote access:
 
@@ -2718,9 +3456,368 @@ MyMCP/
 
 ## 🧪 Testing
 
+Comprehensive testing guide covering local testing, Codespaces, and GitHub Actions (CI/CD).
+
+### Understanding Test API Keys
+
+The test suite uses the `MCP_API_KEY` environment variable with intelligent fallback behavior:
+
+**Priority Order (first found wins):**
+1. **Environment Variable**: `export MCP_API_KEY="your-key"`
+2. **Fallback Key**: `test-api-key-12345678` (hardcoded in tests)
+
+**Fallback Key Behavior:**
+```python
+# From tests/conftest.py
+API_KEY = os.getenv("MCP_API_KEY", "test-api-key-12345678")
+```
+
+The fallback key (`test-api-key-12345678`) allows tests to run without configuration, but **only works when authentication is disabled** on the server:
+
+```yaml
+# Server configuration for tests
+authentication:
+  enabled: false  # Allows tests to run without real API key
+```
+
+**When Authentication is Enabled:**
+- Tests require matching API keys between client and server
+- Set `MCP_API_KEY` environment variable to match server config
+- Used in authentication tests to verify key validation
+
+### Testing in Different Environments
+
+#### Local Machine Testing
+
+**Prerequisites:**
+```bash
+# Install test dependencies
+pip install -r requirements-test.txt
+
+# Contents include:
+# - pytest>=7.4.0
+# - pytest-asyncio>=0.21.0
+# - httpx>=0.24.0
+```
+
+**Option 1: Quick Test (No Auth)**
+```bash
+# Start server without authentication
+python src/math_server/server.py --transport http --port 8000 &
+SERVER_PID=$!
+
+# Run all tests
+pytest tests/test_http_client.py -v
+
+# Cleanup
+kill $SERVER_PID
+```
+
+**Option 2: Use Test Script**
+```bash
+# Script handles server startup/shutdown automatically
+./run_http_tests.sh
+
+# Or manually specify server URL
+MATH_SERVER_URL="http://localhost:8000" ./run_http_tests.sh
+```
+
+**Option 3: Test with Authentication**
+```bash
+# Set up environment
+export MCP_API_KEY="test-key-for-local-testing-123"
+export MCP_AUTH_ENABLED=true
+
+# Start server with auth enabled
+python src/math_server/server.py --transport http --port 8000 &
+SERVER_PID=$!
+
+# Run tests (will use MCP_API_KEY from environment)
+pytest tests/test_http_client.py -v -k "auth"
+
+# Cleanup
+kill $SERVER_PID
+```
+
+**Option 4: Test Specific Categories**
+```bash
+# Tool execution tests only
+pytest tests/test_http_client.py -k "tool" -v
+
+# Authentication tests only
+pytest tests/test_http_client.py -k "auth" -v
+
+# Rate limiting tests only
+pytest tests/test_http_client.py -k "rate_limit" -v
+
+# Health endpoint tests only
+pytest tests/test_http_client.py -k "health" -v
+```
+
+#### GitHub Codespaces Testing
+
+**Step 1: Ensure Codespaces Secret is Set**
+
+If not already done, set up `MCP_API_KEY` in Codespaces Secrets:
+1. Go to https://github.com/settings/codespaces
+2. Create secret: `MCP_API_KEY` = `your-secure-key`
+3. Rebuild container
+
+**Step 2: Verify Secret is Loaded**
+```bash
+# In Codespace terminal
+echo $MCP_API_KEY
+# Should output your key, not empty
+```
+
+**Step 3: Run Tests**
+
+**Without Authentication:**
+```bash
+# Start servers (auth disabled by default)
+./start-http-servers.sh start
+
+# Run tests
+pytest tests/test_http_client.py -v
+
+# Expected: All tests pass except auth tests (skipped)
+```
+
+**With Authentication:**
+```bash
+# Start servers with auth enabled
+export MCP_AUTH_ENABLED=true
+./start-http-servers.sh start
+
+# Run all tests including auth tests
+pytest tests/test_http_client.py -v
+
+# Expected: All tests pass including auth tests
+```
+
+**Test Against Public Codespace URLs:**
+```bash
+# Get your Codespace URL from PORTS panel
+# Example: https://jubilant-space-waddle-5p4v997xqw5h555-8000.app.github.dev
+
+# Set URL and run tests
+export MATH_SERVER_URL="https://your-codespace-8000.app.github.dev"
+pytest tests/test_http_client.py -v
+```
+
+#### GitHub Actions Testing (CI/CD)
+
+The repository includes automated testing via GitHub Actions (`.github/workflows/test-http-client.yml`).
+
+**Workflow Structure:**
+1. **test** job: Tests without authentication (Python 3.11 & 3.12)
+2. **test-with-auth** job: Tests with authentication enabled
+3. **test-with-rate-limit** job: Tests with rate limiting enabled
+
+**Setting Up Repository Secrets:**
+
+For authentication tests to run in GitHub Actions, configure Repository Secrets:
+
+**Step 1: Navigate to Repository Secrets**
+1. Go to: https://github.com/mhoh79/MyMCP/settings/secrets/actions
+2. Click **New repository secret**
+
+**Step 2: Add MCP_API_KEY Secret**
+- **Name**: `MCP_API_KEY`
+- **Value**: `test-api-key-for-ci-12345678` (or your preferred test key)
+- Click **Add secret**
+
+**Step 3: How Workflow Uses the Secret**
+```yaml
+# From .github/workflows/test-http-client.yml
+- name: Run authentication tests
+  env:
+    MCP_API_KEY: ${{ secrets.MCP_API_KEY }}  # ← Injected from Repository Secret
+  run: |
+    pytest tests/test_http_client.py -v -k "auth"
+```
+
+**Step 4: Verify Tests Pass**
+1. Push a commit or go to **Actions** tab
+2. Manually trigger workflow: Actions → Test HTTP Client → Run workflow
+3. Check that all jobs pass (test, test-with-auth, test-with-rate-limit)
+
+**Understanding Test Configuration in CI:**
+
+The workflow creates different configs for each test scenario:
+
+**No Auth Configuration (config-test-no-auth.yaml):**
+```yaml
+authentication:
+  enabled: false  # Uses fallback key in tests
+  api_key: "not-required"
+
+rate_limiting:
+  enabled: false
+```
+
+**Auth Configuration (config-test-auth.yaml):**
+```yaml
+authentication:
+  enabled: true
+  api_key: "test-api-key-for-ci-12345678"  # Must match MCP_API_KEY secret
+
+rate_limiting:
+  enabled: false
+```
+
+**Rate Limit Configuration (config-test-ratelimit.yaml):**
+```yaml
+authentication:
+  enabled: false
+
+rate_limiting:
+  enabled: true
+  requests_per_minute: 30  # Low limit for testing
+```
+
+### Test Suite Overview
+
+**Test Coverage:**
+- ✅ 40+ tests covering all HTTP transport features
+- ✅ SSE connection establishment
+- ✅ MCP protocol (initialize, tools/list, tools/call)
+- ✅ All 24 MCP tools (math, stats, text, etc.)
+- ✅ Authentication scenarios (valid/invalid/missing keys)
+- ✅ Rate limiting behavior
+- ✅ CORS headers
+- ✅ Health endpoints (/health, /ready, /metrics)
+- ✅ Concurrent requests
+- ✅ Error handling
+
+**Example Test Output:**
+```
+tests/test_http_client.py::test_sse_connection PASSED              [  2%]
+tests/test_http_client.py::test_initialize PASSED                  [  5%]
+tests/test_http_client.py::test_list_tools PASSED                  [  7%]
+tests/test_http_client.py::test_fibonacci_tool PASSED              [ 10%]
+tests/test_http_client.py::test_is_prime_tool PASSED               [ 12%]
+...
+tests/test_http_client.py::test_auth_valid_key PASSED              [ 85%]
+tests/test_http_client.py::test_auth_invalid_key PASSED            [ 87%]
+tests/test_http_client.py::test_rate_limit_within PASSED           [ 90%]
+...
+======== 40 passed, 4 skipped in 1.73s ========
+```
+
+### Environment-Specific Testing Workflows
+
+#### Workflow: Local Development
+
+```bash
+# 1. Start server locally (no auth)
+python src/math_server/server.py --transport http &
+
+# 2. Run quick smoke tests
+pytest tests/test_http_client.py -k "health or fibonacci" -v
+
+# 3. Full test suite
+./run_http_tests.sh
+
+# 4. Stop server
+pkill -f "math_server"
+```
+
+#### Workflow: Codespaces Development
+
+```bash
+# 1. Verify Codespaces Secret
+echo "Secret loaded: $([ -n "$MCP_API_KEY" ] && echo 'Yes ✓' || echo 'No ✗')"
+
+# 2. Start servers
+./start-http-servers.sh start
+
+# 3. Run tests
+pytest tests/test_http_client.py -v
+
+# 4. Test public endpoint (if port is public)
+export MATH_SERVER_URL="https://$(echo $CODESPACE_NAME)-8000.app.github.dev"
+pytest tests/test_http_client.py -k "health" -v
+```
+
+#### Workflow: GitHub Actions (Automated)
+
+```yaml
+# Triggered automatically on:
+# - Push to main/develop
+# - Pull requests
+# - Manual workflow_dispatch
+
+# No manual setup needed after Repository Secret is configured
+# Tests run in parallel: no-auth, with-auth, with-rate-limit
+```
+
+### Test Configuration Comparison
+
+| Environment | Auth Enabled | API Key Source | Server Config | Expected Results |
+|-------------|--------------|----------------|---------------|------------------|
+| **Local (default)** | No | Fallback | None | 40 passed, 4 skipped (auth tests) |
+| **Local (with auth)** | Yes | `$MCP_API_KEY` | Manual config | 44 passed |
+| **Codespaces (default)** | No | Fallback | config.dev.yaml | 40 passed, 4 skipped |
+| **Codespaces (with auth)** | Yes | Codespaces Secret | config.prod.yaml | 44 passed |
+| **GitHub Actions (no auth)** | No | Fallback | config-test-no-auth.yaml | 40 passed, 4 skipped |
+| **GitHub Actions (auth)** | Yes | Repository Secret | config-test-auth.yaml | ~15 auth tests passed |
+| **GitHub Actions (rate limit)** | No | Fallback | config-test-ratelimit.yaml | ~8 rate limit tests passed |
+
+### Troubleshooting Tests
+
+**Issue: "Connection refused" error**
+```bash
+# Check if server is running
+curl http://localhost:8000/health
+
+# Start server if not running
+python src/math_server/server.py --transport http &
+```
+
+**Issue: Auth tests fail with "Invalid API key"**
+```bash
+# Verify MCP_API_KEY matches server config
+echo $MCP_API_KEY
+
+# Check server's config.yaml or environment
+grep "api_key:" config.yaml
+
+# Make sure they match!
+```
+
+**Issue: All tests skipped**
+```bash
+# Install test dependencies
+pip install -r requirements-test.txt
+
+# Verify pytest-asyncio is installed
+pip list | grep pytest-asyncio
+```
+
+**Issue: Tests hang or timeout**
+```bash
+# Server might not be started or is on different port
+# Check server logs
+cat logs/math_server.log
+
+# Verify port
+lsof -i :8000  # Mac/Linux
+netstat -ano | findstr :8000  # Windows
+```
+
+**Issue: "Secret not found" in Codespaces**
+```bash
+# Rebuild container to load Codespaces Secret
+# Command Palette → "Codespaces: Rebuild Container"
+
+# After rebuild, verify
+echo $MCP_API_KEY
+```
+
 ### Using MCP Inspector
 
-The MCP Inspector is a web-based tool for testing MCP servers:
+The MCP Inspector is a web-based tool for interactive testing of MCP servers (stdio mode):
 
 ```bash
 # Test Math Calculator Server
@@ -2876,36 +3973,316 @@ print(encode_decode("Hello World!", "encode", "url"))    # Output: 'Hello%20Worl
 
 When deploying MCP servers in production or exposing them over HTTP, follow these security best practices:
 
+### Never Commit .env Files
+
+⚠️ **CRITICAL**: `.env` files contain secrets and must NEVER be committed to version control!
+
+**Protection Checklist:**
+
+```bash
+# 1. Verify .env is in .gitignore
+grep "^\.env$" .gitignore
+
+# 2. If not present, add it immediately
+echo ".env" >> .gitignore
+
+# 3. Check if .env was already committed (DANGEROUS!)
+git log --all --full-history -- .env
+
+# 4. If found in history, remove it (requires force push)
+git filter-branch --force --index-filter \
+  'git rm --cached --ignore-unmatch .env' \
+  --prune-empty --tag-name-filter cat -- --all
+
+# 5. Force push (WARNING: Coordinate with team first!)
+git push origin --force --all
+
+# 6. Rotate compromised keys immediately!
+```
+
+**Why This Matters:**
+- ❌ Committed secrets are **PERMANENT** in Git history
+- ❌ Anyone with repo access (past or present) can see them
+- ❌ Forks and clones contain the entire history
+- ❌ Automated bots scan GitHub for exposed secrets
+- ❌ Compromised keys can be used maliciously
+
+**Safe Alternatives:**
+- ✅ Use `.env.example` as a template (no real secrets)
+- ✅ Use GitHub Secrets for CI/CD and Codespaces
+- ✅ Use environment variables in production
+- ✅ Use secret management services (AWS Secrets Manager, Azure Key Vault)
+- ✅ Document setup process, not actual secrets
+
+**Template Approach:**
+```bash
+# .env.example (safe to commit)
+MCP_API_KEY=your-secret-api-key-here
+MCP_AUTH_ENABLED=true
+
+# .env (never commit, in .gitignore)
+MCP_API_KEY=sk_mcp_RealSecretKey123456789012
+MCP_AUTH_ENABLED=true
+```
+
 ### API Key Management
 
 ✅ **DO**:
-- Generate strong, random API keys (minimum 32 characters)
-- Use a password manager or key generation tool (e.g., `openssl rand -hex 32`)
-- Store API keys in environment variables, never in code
+- Generate strong, cryptographically random API keys (minimum 32 characters)
+- Use the automated setup script: `.\setup-api-key.ps1`
+- Store API keys in password managers (1Password, LastPass, Bitwarden)
 - Use different API keys for different environments (dev, staging, production)
-- Rotate API keys regularly (e.g., every 90 days)
-- Use `.gitignore` to prevent committing `config.yaml` with real keys
+- Use different API keys for different clients/teams (improves audit trail)
+- Rotate API keys regularly (recommended: every 90 days)
+- Keep rotation logs: When rotated, who rotated, why rotated
+- Use GitHub Secrets for CI/CD and Codespaces
+- Document key purpose and owner in secure location
+- Test new keys before revoking old keys (zero-downtime rotation)
 
 ❌ **DON'T**:
-- Never commit API keys to version control
+- Never commit API keys to version control (Git history is permanent!)
 - Don't use simple or guessable keys like "password123" or "my-api-key"
-- Don't share API keys in chat, email, or documentation
-- Don't use the same key across multiple services
+- Don't share API keys via email, Slack, Teams, or unencrypted channels
+- Don't reuse keys across multiple services or environments
 - Don't disable authentication in production
+- Don't ignore key rotation (set calendar reminders!)
+- Don't share keys between multiple users (use separate keys per user/client)
+- Don't forget to revoke old keys after rotation
 
 **Example - Generate Strong API Key**:
 ```bash
-# Linux/Mac
-openssl rand -hex 32
+# Recommended: Use the setup script (Windows PowerShell)
+.\setup-api-key.ps1
 
-# Python
-python -c "import secrets; print(secrets.token_urlsafe(32))"
+# Linux/Mac with OpenSSL
+echo "sk_mcp_$(openssl rand -base64 24 | tr -d '/+=' | cut -c1-32)"
 
-# PowerShell (using cryptographically secure random)
--join ((1..32) | ForEach-Object { "{0:X2}" -f (Get-Random -Minimum 0 -Maximum 256) })
+# Python (all platforms)
+python -c "import secrets; print('sk_mcp_' + secrets.token_urlsafe(24))"
 
-# Alternative: Use Python on Windows for consistency
-python -c "import secrets; print(secrets.token_urlsafe(32))"
+# PowerShell (cryptographically secure)
+$bytes = [byte[]]::new(24)
+[System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+"sk_mcp_$([Convert]::ToBase64String($bytes).Replace('+','-').Replace('/','_').TrimEnd('='))"
+```
+
+### Key Rotation Policy
+
+Establish a regular API key rotation schedule:
+
+**Recommended Schedule:**
+- **Development Keys**: Every 90 days or on team member departure
+- **Staging Keys**: Every 60 days
+- **Production Keys**: Every 90 days or immediately on suspected compromise
+- **Emergency Rotation**: Immediately if exposed (GitHub commit, logs, support ticket)
+
+**Rotation Process:**
+
+**Step 1: Generate New Key**
+```bash
+# Generate new key
+.\setup-api-key.ps1
+
+# Save to password manager with date and purpose
+# Example: "MCP Production Key - Rotated 2025-01-15"
+```
+
+**Step 2: Update Secrets (Zero-Downtime)**
+```bash
+# Option A: Update GitHub Secrets first
+# 1. Go to repository/Codespaces settings
+# 2. Update MCP_API_KEY to new value
+# 3. For Codespaces: Rebuild containers
+# 4. For Actions: Next workflow run uses new key
+
+# Option B: Update .env files
+# 1. Update .env in all environments
+# 2. Restart services to load new key
+```
+
+**Step 3: Test New Key**
+```bash
+# Test before revoking old key
+curl -H "Authorization: Bearer $NEW_API_KEY" \
+  https://your-server.com/health
+
+# Expected: {"status":"ok"}
+```
+
+**Step 4: Update Clients**
+```bash
+# Update all clients to use new key
+# Monitor logs for authentication failures
+
+# Check metrics for any issues
+curl https://your-server.com/metrics
+```
+
+**Step 5: Revoke Old Key**
+```bash
+# After confirming new key works everywhere:
+# 1. Remove old key from password manager
+# 2. Update documentation
+# 3. Log rotation in security audit trail
+
+# Example audit log entry:
+# 2025-01-15: Rotated prod API key (scheduled 90-day rotation)
+# Old key: sk_mcp_ABC...XYZ (last 8 chars)
+# New key: sk_mcp_DEF...123 (last 8 chars)
+# Rotated by: admin@example.com
+```
+
+**Rotation Checklist:**
+- [ ] Generate new strong API key
+- [ ] Save in password manager with rotation date
+- [ ] Update GitHub Repository Secrets
+- [ ] Update GitHub Codespaces Secrets
+- [ ] Rebuild Codespace containers
+- [ ] Update production .env files
+- [ ] Restart production services
+- [ ] Test new key in all environments
+- [ ] Update client configurations
+- [ ] Monitor for authentication failures
+- [ ] Revoke/delete old key after 24-48 hours
+- [ ] Document rotation in security log
+- [ ] Set calendar reminder for next rotation
+
+### Different Keys Per Environment
+
+**Why Separate Keys?**
+- 🔒 Limit blast radius if one key is compromised
+- 📊 Better audit trail (track usage per environment)
+- 🎯 Easier to revoke specific environments
+- 🔐 Enforce different security policies per environment
+- 🚨 Detect if prod key is accidentally used in dev
+
+**Recommended Key Structure:**
+```
+Development:     sk_mcp_dev_AbCdEf123456789012...
+Staging:         sk_mcp_stg_XyZaBc789012345678...
+Production:      sk_mcp_prod_LmNoPq345678901234...
+CI/CD:           sk_mcp_ci_QrStUv901234567890...
+Client A:        sk_mcp_clienta_WxYzAb567890...
+Client B:        sk_mcp_clientb_CdEfGh123456...
+```
+
+**Key Naming Convention:**
+- Prefix: `sk_mcp_` (secret key, MCP service)
+- Environment: `dev_`, `stg_`, `prod_`, `ci_`
+- Random: 24+ character random string
+- Example: `sk_mcp_prod_AbCdEfGhIjKlMnOpQrStUvWx`
+
+**Configuration per Environment:**
+
+**Development (.env.dev):**
+```bash
+MCP_API_KEY=sk_mcp_dev_AbCdEf123456789012...
+MCP_AUTH_ENABLED=false  # Optional for speed
+MCP_LOG_LEVEL=DEBUG
+```
+
+**Staging (.env.stg):**
+```bash
+MCP_API_KEY=sk_mcp_stg_XyZaBc789012345678...
+MCP_AUTH_ENABLED=true
+MCP_RATE_LIMIT_ENABLED=true
+MCP_LOG_LEVEL=INFO
+```
+
+**Production (.env.prod):**
+```bash
+MCP_API_KEY=sk_mcp_prod_LmNoPq345678901234...
+MCP_AUTH_ENABLED=true
+MCP_RATE_LIMIT_ENABLED=true
+MCP_RATE_LIMIT_RPM=60
+MCP_LOG_LEVEL=WARNING
+```
+
+### Audit Trail for Secret Access
+
+Track who accesses secrets and when:
+
+**GitHub Built-in Audit Logs:**
+
+GitHub provides audit logs for secret access:
+
+**Repository Secrets Audit:**
+1. Go to repository **Settings** → **Actions** → **Secrets**
+2. Recent changes are logged
+3. Check repository audit log: Settings → Audit log
+
+**Codespaces Secrets Audit:**
+1. Go to https://github.com/settings/security-log
+2. Filter by action: `codespaces_secret.*`
+3. View who created/updated/deleted secrets
+
+**Query Audit Log (GitHub CLI):**
+```bash
+# Install GitHub CLI
+gh auth login
+
+# List audit events for repository
+gh api /repos/mhoh79/MyMCP/events --paginate | jq '.[] | select(.type == "SecretScanningAlertEvent")'
+
+# List secret scanning alerts
+gh api /repos/mhoh79/MyMCP/secret-scanning/alerts
+```
+
+**Manual Audit Log (Recommended):**
+
+Maintain a separate audit log for key rotations and access:
+
+**security-audit.log** (store securely, not in repo):
+```
+2025-01-15 10:30:00 UTC | KEY_CREATED | prod | admin@example.com | Scheduled rotation
+2025-01-15 10:35:00 UTC | KEY_TESTED | prod | admin@example.com | Health check passed
+2025-01-15 10:40:00 UTC | KEY_DEPLOYED | prod | admin@example.com | Updated all services
+2025-01-15 11:00:00 UTC | KEY_REVOKED | prod | admin@example.com | Old key removed after verification
+2025-01-20 14:20:00 UTC | KEY_ACCESSED | prod | GitHub Actions | Workflow run #123
+2025-02-01 09:15:00 UTC | KEY_COMPROMISED | dev | security@example.com | Found in logs, rotated immediately
+```
+
+**Log Entry Format:**
+```
+YYYY-MM-DD HH:MM:SS TZ | ACTION | ENVIRONMENT | WHO | REASON/NOTES
+```
+
+**Audit Actions to Track:**
+- `KEY_CREATED`: New key generated
+- `KEY_TESTED`: Key tested successfully
+- `KEY_DEPLOYED`: Key deployed to environment
+- `KEY_ACCESSED`: Key used (from logs)
+- `KEY_ROTATED`: Key replaced (scheduled rotation)
+- `KEY_REVOKED`: Old key removed
+- `KEY_COMPROMISED`: Security incident
+- `KEY_EXPOSED`: Accidentally committed/leaked
+
+**Automated Audit Trail (Server Logs):**
+
+The MCP server logs all authentication attempts:
+
+```python
+# From server logs
+2025-01-20 14:20:15 INFO - Authentication successful for request from 203.0.113.5
+2025-01-20 14:20:16 WARNING - Authentication failed: Invalid API key from 203.0.113.10
+2025-01-20 14:21:05 INFO - Rate limit exceeded for IP 203.0.113.10
+```
+
+**Monitor logs regularly** for:
+- ⚠️ Authentication failures (wrong keys)
+- ⚠️ Rate limit violations (abuse attempts)
+- ⚠️ Unusual access patterns (off-hours, new IPs)
+- ✅ Successful authentications (verify legitimate usage)
+
+**Set up log monitoring alerts:**
+```bash
+# Example: Alert on 10+ auth failures in 5 minutes
+# Use monitoring tools: Datadog, Prometheus, CloudWatch, etc.
+
+# Simple grep-based monitoring
+tail -f logs/math_server.log | grep "Authentication failed" | \
+  awk '{print $1, $2}' | uniq -c | \
+  awk '$1 >= 10 {print "ALERT: " $1 " auth failures at " $2 " " $3}'
 ```
 
 ### HTTPS in Production
