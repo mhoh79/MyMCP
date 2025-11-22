@@ -238,6 +238,10 @@ function Update-PlaceholdersInFile {
             $content = $content -replace [regex]::Escape($key), $Replacements[$key]
         }
         
+        # Ensure file ends with newline for proper text file formatting
+        if (-not $content.EndsWith("`n")) {
+            $content += "`n"
+        }
         Set-Content -Path $FilePath -Value $content -Encoding UTF8 -NoNewline
         return $true
     }
@@ -321,6 +325,10 @@ custom_servers:
 "@
         }
         
+        # Ensure config file ends with newline for proper YAML formatting
+        if (-not $content.EndsWith("`n")) {
+            $content += "`n"
+        }
         Set-Content -Path $ConfigPath -Value $content -Encoding UTF8 -NoNewline
         Write-Success "config.yaml updated successfully"
         return $true

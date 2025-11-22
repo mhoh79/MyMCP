@@ -7,6 +7,7 @@ and creates valid server structures.
 
 import os
 import subprocess
+import sys
 import pytest
 import yaml
 from pathlib import Path
@@ -165,7 +166,7 @@ class TestCreateServerScript:
         # Try to import the server
         result = subprocess.run(
             [
-                "python3",
+                sys.executable,
                 "-c",
                 f"from src.custom.{server_name}.server import TestImportCheck; "
                 f"server = TestImportCheck(); "
@@ -302,7 +303,7 @@ class TestCreateServerScript:
         test_file = repo_root / "tests" / "custom" / f"test_{server_name}.py"
         result = subprocess.run(
             [
-                "python3",
+                sys.executable,
                 "-m",
                 "pytest",
                 str(test_file),
