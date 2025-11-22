@@ -365,20 +365,32 @@ class BaseMCPServer(ABC):
                     # Execute the tool
                     handler = self.tool_registry.get_handler(tool_name)
                     if handler is None:
-                        return {
-                            "jsonrpc": "2.0",
-                            "error": {
-                                "code": -32601,
-                                "message": f"Tool not found: {tool_name}"
-                            },
-                            "id": request_id
+                        # Return error as result (not JSON-RPC error) for consistency
+                        from mcp.types import TextContent
+                        result = {
+                            "content": [{
+                                "type": "text",
+                                "text": f"Tool not found: {tool_name}"
+                            }],
+                            "isError": True
                         }
-                    
-                    tool_result = await handler(tool_arguments)
-                    result = {
-                        "content": [content.model_dump() for content in tool_result.content],
-                        "isError": tool_result.isError
-                    }
+                    else:
+                        try:
+                            tool_result = await handler(tool_arguments)
+                            result = {
+                                "content": [content.model_dump() for content in tool_result.content],
+                                "isError": tool_result.isError
+                            }
+                        except Exception as e:
+                            # Handle tool execution errors
+                            self.logger.error(f"Error executing tool {tool_name}: {e}", exc_info=True)
+                            result = {
+                                "content": [{
+                                    "type": "text",
+                                    "text": f"Error executing tool: {str(e)}"
+                                }],
+                                "isError": True
+                            }
                 else:
                     return {
                         "jsonrpc": "2.0",
