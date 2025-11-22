@@ -33,11 +33,9 @@ from mcp.types import (
 
 # HTTP transport imports
 from fastapi import FastAPI, Request
-from fastapi.responses import StreamingResponse
 import uvicorn
 from sse_starlette.sse import EventSourceResponse
 import json
-from contextlib import asynccontextmanager
 
 # Import configuration module
 # Add parent directory to path to import config module
