@@ -123,7 +123,7 @@ export MCP_API_KEY="your-api-key-here"
 
 ```bash
 # Start the server
-python -m src.builtin.math_server.server --transport http --host 0.0.0.0 --port 8000
+python -m src.builtin.math_server --transport http --host 0.0.0.0 --port 8000
 
 # Run tests in another terminal
 pytest tests/test_http_client.py -v
@@ -136,7 +136,7 @@ pytest tests/test_http_client.py -v
 
 ```bash
 # Start the server
-python -m src.builtin.stats_server.server --transport http --host 0.0.0.0 --port 8001
+python -m src.builtin.stats_server --transport http --host 0.0.0.0 --port 8001
 
 # Run tests in another terminal
 pytest tests/test_http_stats_server.py -v
@@ -167,8 +167,8 @@ pytest tests/test_http_stats_server.py -v
 
 ```bash
 # Start both servers
-python -m src.builtin.math_server.server --transport http --host 0.0.0.0 --port 8000 &
-python -m src.builtin.stats_server.server --transport http --host 0.0.0.0 --port 8001 &
+python -m src.builtin.math_server --transport http --host 0.0.0.0 --port 8000 &
+python -m src.builtin.stats_server --transport http --host 0.0.0.0 --port 8001 &
 
 # Run all tests
 ./run_all_tests.sh --no-servers
@@ -387,7 +387,7 @@ jobs:
           pip install -r requirements-test.txt
       - name: Start MCP server
         run: |
-          python -m src.builtin.math_server.server --transport http --port 8000 &
+          python -m src.builtin.math_server --transport http --port 8000 &
           sleep 5
       - name: Run tests
         run: pytest tests/test_http_client.py -v --cov=tests
@@ -404,7 +404,7 @@ httpx.ConnectError: [Errno 111] Connection refused
 **Solution**: Make sure the MCP server is running:
 
 ```bash
-python -m src.builtin.math_server.server --transport http --host 0.0.0.0 --port 8000
+python -m src.builtin.math_server --transport http --host 0.0.0.0 --port 8000
 ```
 
 ### Timeout Errors

@@ -132,7 +132,7 @@ if [ "$START_SERVERS" = "yes" ]; then
     if [ "$TEST_MATH" = true ]; then
         echo -e "\n${GREEN}Starting Math MCP HTTP server on port $MATH_PORT...${NC}"
         
-        CMD_ARGS=(python -m src.builtin.math_server.server --transport http --host 127.0.0.1 --port "$MATH_PORT")
+        CMD_ARGS=(python -m src.builtin.math_server --transport http --host 127.0.0.1 --port "$MATH_PORT")
         if [ -n "$CONFIG_FILE" ]; then
             CMD_ARGS+=(--config "$CONFIG_FILE")
         fi
@@ -150,7 +150,7 @@ if [ "$START_SERVERS" = "yes" ]; then
     if [ "$TEST_STATS" = true ]; then
         echo -e "\n${GREEN}Starting Stats MCP HTTP server on port $STATS_PORT...${NC}"
         
-        CMD_ARGS=(python -m src.builtin.stats_server.server --transport http --host 127.0.0.1 --port "$STATS_PORT")
+        CMD_ARGS=(python -m src.builtin.stats_server --transport http --host 127.0.0.1 --port "$STATS_PORT")
         if [ -n "$CONFIG_FILE" ]; then
             CMD_ARGS+=(--config "$CONFIG_FILE")
         fi

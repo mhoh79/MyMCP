@@ -4,14 +4,14 @@
       "command": "c:\\Users\\matti\\OneDrive\\Github\\MyMCP\\venv\\Scripts\\python.exe",
       "args": [
         "-m",
-        "src.builtin.math_server.server"
+        "src.builtin.math_server"
       ]
     },
     "stats-server": {
       "command": "c:\\Users\\matti\\OneDrive\\Github\\MyMCP\\venv\\Scripts\\python.exe",
       "args": [
         "-m",
-        "src.builtin.stats_server.server"
+        "src.builtin.stats_server"
       ]
     }
   }

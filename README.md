@@ -235,15 +235,15 @@ The MCP servers support **dual transport modes**, allowing flexibility in how cl
 **Individual Servers**:
 ```bash
 # Math server on port 8000
-python -m src.builtin.math_server.server --transport http --port 8000
+python -m src.builtin.math_server --transport http --port 8000
 
 # Stats server on port 8001
-python -m src.builtin.stats_server.server --transport http --port 8001
+python -m src.builtin.stats_server --transport http --port 8001
 ```
 
 **With Configuration**:
 ```bash
-python -m src.builtin.math_server.server --transport http --config config.yaml
+python -m src.builtin.math_server --transport http --config config.yaml
 ```
 
 ## 📋 Prerequisites
@@ -696,7 +696,7 @@ MCP_AUTH_ENABLED=false
 **As environment variable:**
 ```bash
 export MCP_AUTH_ENABLED=false
-python -m src.builtin.math_server.server --transport http
+python -m src.builtin.math_server --transport http
 ```
 
 **In config.yaml:**
@@ -751,7 +751,7 @@ print(f"Auth enabled: {auth_enabled}")
 **Start server and test:**
 ```bash
 # Start with environment variables
-python -m src.builtin.math_server.server --transport http
+python -m src.builtin.math_server --transport http
 
 # In another terminal, test
 curl -H "Authorization: Bearer $MCP_API_KEY" http://localhost:8000/health
@@ -846,7 +846,7 @@ logging:
 **Start Private Server:**
 ```bash
 # Local machine
-python -m src.builtin.math_server.server --transport http --port 8000
+python -m src.builtin.math_server --transport http --port 8000
 
 # Access locally
 curl http://localhost:8000/health
@@ -914,7 +914,7 @@ export MCP_AUTH_ENABLED=true
 export MCP_API_KEY="your-generated-api-key-here"
 
 # Start server with production config
-python -m src.builtin.math_server.server --transport http --port 9000 --config config.prod.yaml
+python -m src.builtin.math_server --transport http --port 9000 --config config.prod.yaml
 ```
 
 **In Codespaces (Public Ports):**
@@ -1157,13 +1157,13 @@ Run servers with configuration:
 
 ```bash
 # With config file
-python -m src.builtin.math_server.server --config config.yaml
+python -m src.builtin.math_server --config config.yaml
 
 # With environment overrides
-MCP_LOG_LEVEL=DEBUG python -m src.builtin.stats_server.server --config config.yaml
+MCP_LOG_LEVEL=DEBUG python -m src.builtin.stats_server --config config.yaml
 
 # Without config (uses defaults)
-python -m src.builtin.math_server.server
+python -m src.builtin.math_server
 ```
 
 ### 5. Security Configuration (Optional)
@@ -1357,13 +1357,13 @@ Run each server directly to verify they work:
 
 ```bash
 # Test Math Calculator Server
-python -m src.builtin.math_server.server
+python -m src.builtin.math_server
 
 # Test Statistical Analysis Server (in a new terminal)
-python -m src.builtin.stats_server.server
+python -m src.builtin.stats_server
 
 # Test with configuration
-python -m src.builtin.math_server.server --config config.yaml
+python -m src.builtin.math_server --config config.yaml
 ```
 
 Each server will start and wait for MCP protocol messages on stdin. Press `Ctrl+C` to stop.
@@ -1403,7 +1403,7 @@ pip install -r requirements-test.txt
 ./run_http_tests.sh
 
 # Or manually
-python -m src.builtin.math_server.server --transport http --port 8000 &
+python -m src.builtin.math_server --transport http --port 8000 &
 pytest tests/test_http_client.py -v
 ```
 
@@ -1486,10 +1486,10 @@ For faster iteration when developing or modifying server code, use the built-in 
 
 ```bash
 # Start math server with hot-reload
-python -m src.builtin.math_server.server --transport http --port 8000 --dev
+python -m src.builtin.math_server --transport http --port 8000 --dev
 
 # Start stats server with hot-reload
-python -m src.builtin.stats_server.server --transport http --port 8001 --dev
+python -m src.builtin.stats_server --transport http --port 8001 --dev
 ```
 
 ### VS Code Debugging
@@ -3506,7 +3506,7 @@ pip install -r requirements-test.txt
 **Option 1: Quick Test (No Auth)**
 ```bash
 # Start server without authentication
-python -m src.builtin.math_server.server --transport http --port 8000 &
+python -m src.builtin.math_server --transport http --port 8000 &
 SERVER_PID=$!
 
 # Run all tests
@@ -3532,7 +3532,7 @@ export MCP_API_KEY="test-key-for-local-testing-123"
 export MCP_AUTH_ENABLED=true
 
 # Start server with auth enabled
-python -m src.builtin.math_server.server --transport http --port 8000 &
+python -m src.builtin.math_server --transport http --port 8000 &
 SERVER_PID=$!
 
 # Run tests (will use MCP_API_KEY from environment)
@@ -3714,7 +3714,7 @@ tests/test_http_client.py::test_rate_limit_within PASSED           [ 90%]
 
 ```bash
 # 1. Start server locally (no auth)
-python -m src.builtin.math_server.server --transport http &
+python -m src.builtin.math_server --transport http &
 
 # 2. Run quick smoke tests
 pytest tests/test_http_client.py -k "health or fibonacci" -v
@@ -3775,7 +3775,7 @@ pytest tests/test_http_client.py -k "health" -v
 curl http://localhost:8000/health
 
 # Start server if not running
-python -m src.builtin.math_server.server --transport http &
+python -m src.builtin.math_server --transport http &
 ```
 
 **Issue: Auth tests fail with "Invalid API key"**
@@ -4739,7 +4739,7 @@ Comprehensive troubleshooting guide for common issues with MCP servers.
 
 1. **Specify config file explicitly**:
    ```bash
-   python -m src.builtin.math_server.server --config config.yaml
+   python -m src.builtin.math_server --config config.yaml
    ```
 
 2. **Check file exists**:
@@ -4807,7 +4807,7 @@ Comprehensive troubleshooting guide for common issues with MCP servers.
 2. **Enable hot-reload only in development**:
    ```bash
    # Don't use --dev in production
-   python -m src.builtin.math_server.server --transport http
+   python -m src.builtin.math_server --transport http
    ```
 
 3. **Consider scaling** (run multiple instances behind load balancer)

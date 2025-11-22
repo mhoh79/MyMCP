@@ -104,7 +104,7 @@ if [ "$START_SERVER" = "yes" ]; then
     echo -e "${GREEN}Starting MCP HTTP server...${NC}"
     
     # Build command as array for proper quoting
-    CMD_ARGS=(python -m src.builtin.math_server.server --transport http --host 127.0.0.1 --port "$SERVER_PORT")
+    CMD_ARGS=(python -m src.builtin.math_server --transport http --host 127.0.0.1 --port "$SERVER_PORT")
     
     if [ -n "$CONFIG_FILE" ]; then
         CMD_ARGS+=(--config "$CONFIG_FILE")

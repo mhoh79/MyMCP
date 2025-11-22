@@ -76,7 +76,7 @@ jobs:
       
       - name: Start MCP HTTP server
         run: |
-          python -m src.builtin.math_server.server --transport http --host 127.0.0.1 --port 8000 --config config-test-no-auth.yaml &
+          python -m src.builtin.math_server --transport http --host 127.0.0.1 --port 8000 --config config-test-no-auth.yaml &
           SERVER_PID=$!
           echo "SERVER_PID=$SERVER_PID" >> $GITHUB_ENV
           
@@ -171,7 +171,7 @@ jobs:
       
       - name: Start MCP HTTP server with authentication
         run: |
-          python -m src.builtin.math_server.server --transport http --host 127.0.0.1 --port 8000 --config config-test-auth.yaml &
+          python -m src.builtin.math_server --transport http --host 127.0.0.1 --port 8000 --config config-test-auth.yaml &
           SERVER_PID=$!
           echo "SERVER_PID=$SERVER_PID" >> $GITHUB_ENV
           
@@ -252,7 +252,7 @@ jobs:
       
       - name: Start MCP HTTP server with rate limiting
         run: |
-          python -m src.builtin.math_server.server --transport http --host 127.0.0.1 --port 8000 --config config-test-ratelimit.yaml &
+          python -m src.builtin.math_server --transport http --host 127.0.0.1 --port 8000 --config config-test-ratelimit.yaml &
           SERVER_PID=$!
           echo "SERVER_PID=$SERVER_PID" >> $GITHUB_ENV
           
