@@ -219,6 +219,9 @@ Use the provided launcher scripts to start both servers in HTTP mode with one co
 # Start both servers
 ./start-http-servers.sh start
 
+# Start with hot-reload (development mode)
+./start-http-servers.sh --dev
+
 # Check status
 ./start-http-servers.sh status
 
@@ -233,6 +236,9 @@ Use the provided launcher scripts to start both servers in HTTP mode with one co
 ```powershell
 # Start both servers
 .\start-http-servers.ps1
+
+# Start with hot-reload (development mode)
+.\start-http-servers.ps1 -Dev
 
 # Check status
 .\start-http-servers.ps1 -Status
@@ -274,6 +280,108 @@ To validate your configuration:
 # Run the configuration test suite
 python test_config.py
 ```
+
+## 🔥 Development Mode
+
+For faster iteration when developing or modifying server code, use the built-in hot-reload feature.
+
+### Starting Servers in Development Mode
+
+**Using Launcher Scripts:**
+
+```bash
+# Linux/Mac - start both servers with hot-reload
+./start-http-servers.sh --dev
+
+# Windows PowerShell - start both servers with hot-reload
+.\start-http-servers.ps1 -Dev
+```
+
+**Manual Start:**
+
+```bash
+# Start math server with hot-reload
+python src/math_server/server.py --transport http --port 8000 --dev
+
+# Start stats server with hot-reload
+python src/stats_server/server.py --transport http --port 8001 --dev
+```
+
+### VS Code Debugging
+
+The repository includes pre-configured VS Code launch configurations in `.vscode/launch.json`:
+
+**Available Debug Configurations:**
+1. **Math Server (HTTP Dev)** - Math server with hot-reload via uvicorn
+2. **Stats Server (HTTP Dev)** - Stats server with hot-reload via uvicorn
+3. **Math Server (stdio)** - Math server in stdio mode for Claude Desktop testing
+4. **Stats Server (stdio)** - Stats server in stdio mode for Claude Desktop testing
+5. **Math Server (HTTP Dev with CLI)** - Math server using --dev flag
+6. **Stats Server (HTTP Dev with CLI)** - Stats server using --dev flag
+
+**Compound Configurations:**
+- **Both Servers (HTTP Dev)** - Run both servers simultaneously with hot-reload
+- **Both Servers (HTTP Dev with CLI)** - Run both servers using CLI --dev flag
+
+**To Use:**
+1. Open the project in VS Code
+2. Press `F5` or go to Run and Debug (Ctrl+Shift+D)
+3. Select a configuration from the dropdown
+4. Click the green play button or press `F5`
+
+### Development Workflow
+
+1. **Start servers in dev mode:**
+   ```bash
+   ./start-http-servers.sh --dev
+   ```
+
+2. **Make code changes** in any Python file under `src/`
+
+3. **Automatic reload** - The server detects changes and restarts automatically (typically takes 1-2 seconds)
+
+4. **Test changes** - The server is immediately available with your updates
+
+5. **Debug with breakpoints** - Use VS Code debug configurations to set breakpoints and step through code
+
+### Hot-Reload Behavior
+
+- **Watched directories**: `src/` and all subdirectories
+- **Monitored file types**: `.py` files
+- **Reload delay**: ~1-2 seconds after file save
+- **Log level**: DEBUG (in dev mode) for more verbose output
+- **Preserved state**: Server state is reset on reload
+
+### Important Notes
+
+⚠️ **Dev mode is for development only**
+- Do NOT use `--dev` flag in production
+- Hot-reload adds overhead and is not suitable for production use
+- Use standard mode for production deployments
+
+🔍 **Debugging Tips**
+- Check `logs/math_server.log` and `logs/stats_server.log` for detailed output
+- Use VS Code's integrated terminal to see reload messages
+- Set breakpoints in tool handlers for step-through debugging
+- Use `--log-level debug` for maximum verbosity
+
+### Troubleshooting Hot-Reload
+
+**Server doesn't restart on changes:**
+- Ensure you're watching the correct directory (`src/`)
+- Check that the file is a `.py` file
+- Verify the server started with `--dev` flag
+- Look for syntax errors in logs
+
+**Port already in use:**
+- Stop other instances: `./start-http-servers.sh stop`
+- Check for orphaned processes: `lsof -i :8000` (Mac/Linux) or `netstat -ano | findstr :8000` (Windows)
+
+**Changes not reflected:**
+- Wait 2-3 seconds after saving
+- Check logs for reload confirmation
+- Verify the file you're editing is in the `src/` directory
+- Try manually restarting the server
 
 ### 6. Configure with Claude Desktop
 
