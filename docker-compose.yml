@@ -48,6 +48,31 @@ services:
     networks:
       - mcp-network
 
+  # Example custom server configuration
+  # Uncomment and modify this section to deploy custom servers
+  # Make sure your custom server is implemented in src/custom/ directory
+  # and that your config.yaml includes the custom_servers configuration
+  #
+  # custom-server-example:
+  #   build: .
+  #   container_name: mcp-custom-server
+  #   ports:
+  #     - "8002:8002"
+  #   volumes:
+  #     - ./config.yaml:/app/config.yaml:ro
+  #   environment:
+  #     <<: *mcp-environment
+  #     HEALTHCHECK_PORT: 8002
+  #   command: python -m src.custom.my_server.server --transport http --host 0.0.0.0 --port 8002 --config config.yaml
+  #   healthcheck:
+  #     <<: *mcp-healthcheck
+  #   restart: unless-stopped
+  #   networks:
+  #     - mcp-network
+  #   depends_on:
+  #     - math-server
+  #     - stats-server
+
   nginx:
     image: nginx:alpine
     container_name: mcp-nginx

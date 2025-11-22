@@ -4,23 +4,31 @@ on:
   push:
     branches: [ main, develop ]
     paths:
-      - 'src/builtin/math_server/**'
+      - 'src/builtin/**'
       - 'src/core/**'
+      - 'src/custom/**'
+      - 'src/templates/**'
       - 'src/middleware.py'
       - 'src/config.py'
       - 'tests/test_http_client.py'
       - 'requirements.txt'
       - 'requirements-test.txt'
+      - 'Dockerfile'
+      - 'docker-compose.yml'
   pull_request:
     branches: [ main, develop ]
     paths:
-      - 'src/builtin/math_server/**'
+      - 'src/builtin/**'
       - 'src/core/**'
+      - 'src/custom/**'
+      - 'src/templates/**'
       - 'src/middleware.py'
       - 'src/config.py'
       - 'tests/test_http_client.py'
       - 'requirements.txt'
       - 'requirements-test.txt'
+      - 'Dockerfile'
+      - 'docker-compose.yml'
   workflow_dispatch:
 
 jobs:

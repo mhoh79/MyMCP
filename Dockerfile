@@ -20,7 +20,13 @@ RUN apt-get update && \
 # Copy dependencies from builder
 COPY --from=builder /root/.local /root/.local
 
-# Copy application code
+# Copy application code - all src/ subdirectories
+# - src/core/ - Core MCP server infrastructure
+# - src/builtin/ - Builtin servers (math_server, stats_server)
+# - src/custom/ - Custom server implementations
+# - src/templates/ - Server templates for scaffolding
+# - src/config.py - Configuration module
+# - src/middleware.py - Middleware components
 COPY src/ ./src/
 COPY config.example.yaml ./
 
