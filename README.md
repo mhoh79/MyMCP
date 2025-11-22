@@ -288,43 +288,46 @@ Before diving into setup, it's important to understand how API keys flow through
 #### API Key Flow: GitHub Secrets → Environment → Application
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                     API Key Flow Diagram                        │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│  GitHub (Cloud)                                                 │
-│  ┌────────────────────────────────────────────────────────────┐│
-│  │ Repository Secrets (Settings → Secrets)                    ││
-│  │ • Used by: GitHub Actions (CI/CD)                          ││
-│  │ • Scope: All workflows in repository                       ││
-│  │ • Example: MCP_API_KEY for test workflows                  ││
-│  └────────────────────────────────────────────────────────────┘│
-│                              ↓                                  │
-│  ┌────────────────────────────────────────────────────────────┐│
-│  │ Codespaces Secrets (Settings → Codespaces)                 ││
-│  │ • Used by: GitHub Codespaces (dev environments)            ││
-│  │ • Scope: All Codespaces for selected repositories          ││
-│  │ • Example: MCP_API_KEY for development/testing             ││
-│  └────────────────────────────────────────────────────────────┘│
-│                              ↓                                  │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│  Local Machine / Codespace / GitHub Actions Runner             │
-│  ┌────────────────────────────────────────────────────────────┐│
-│  │ Environment Variables                                       ││
-│  │ • Loaded at runtime                                         ││
-│  │ • Sources: .env file, system env vars, GitHub Secrets      ││
-│  │ • Example: export MCP_API_KEY="sk_mcp_..."                 ││
-│  └────────────────────────────────────────────────────────────┘│
-│                              ↓                                  │
-│  ┌────────────────────────────────────────────────────────────┐│
-│  │ Python Application (MCP Server)                             ││
-│  │ • Reads: os.environ.get("MCP_API_KEY")                     ││
-│  │ • Validates: Minimum 16 characters                          ││
-│  │ • Uses: Authentication middleware                           ││
-│  └────────────────────────────────────────────────────────────┘│
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
++-------------------------------------------------------------------+
+|                     API Key Flow Diagram                          |
++-------------------------------------------------------------------+
+|                                                                   |
+|  GitHub (Cloud)                                                   |
+|  +--------------------------------------------------------------+ |
+|  | Repository Secrets (Settings -> Secrets)                    | |
+|  | - Used by: GitHub Actions (CI/CD)                           | |
+|  | - Scope: All workflows in repository                        | |
+|  | - Example: MCP_API_KEY for test workflows                   | |
+|  +--------------------------------------------------------------+ |
+|                              |                                    |
+|                              v                                    |
+|  +--------------------------------------------------------------+ |
+|  | Codespaces Secrets (Settings -> Codespaces)                 | |
+|  | - Used by: GitHub Codespaces (dev environments)             | |
+|  | - Scope: All Codespaces for selected repositories           | |
+|  | - Example: MCP_API_KEY for development/testing              | |
+|  +--------------------------------------------------------------+ |
+|                              |                                    |
+|                              v                                    |
++-------------------------------------------------------------------+
+|                                                                   |
+|  Local Machine / Codespace / GitHub Actions Runner               |
+|  +--------------------------------------------------------------+ |
+|  | Environment Variables                                        | |
+|  | - Loaded at runtime                                          | |
+|  | - Sources: .env file, system env vars, GitHub Secrets       | |
+|  | - Example: export MCP_API_KEY="sk_mcp_..."                  | |
+|  +--------------------------------------------------------------+ |
+|                              |                                    |
+|                              v                                    |
+|  +--------------------------------------------------------------+ |
+|  | Python Application (MCP Server)                              | |
+|  | - Reads: os.environ.get("MCP_API_KEY")                      | |
+|  | - Validates: Minimum 16 characters                           | |
+|  | - Uses: Authentication middleware                            | |
+|  +--------------------------------------------------------------+ |
+|                                                                   |
++-------------------------------------------------------------------+
 ```
 
 #### Key Differences Between Secret Types
@@ -374,7 +377,7 @@ First, generate a cryptographically secure API key using one of these methods:
 # You'll see output like:
 # ✓ API key generated successfully
 # Generated API Key:
-# sk_mcp_AbCdEfGhIjKlMnOpQrStUvWxYz123456
+# sk_mcp_EXAMPLE_KEY_REPLACE_THIS_WITH_REAL_KEY
 # ✓ API key copied to clipboard!
 ```
 
@@ -410,7 +413,7 @@ Or manually navigate:
 
 Fill in the form:
 - **Name**: `MCP_API_KEY` (exact name, case-sensitive)
-- **Value**: Paste the API key you generated (e.g., `sk_mcp_AbCdEfGhIjKlMnOpQrStUvWxYz123456`)
+- **Value**: Paste the API key you generated from the previous step
 - **Repository access**: Select repositories that need this secret
   - Choose **Selected repositories** and pick `mhoh79/MyMCP`
   - Or choose **All repositories** if you want it everywhere (less secure)
@@ -593,7 +596,7 @@ Open `.env` in your text editor and update:
 ```bash
 # Authentication Configuration
 MCP_AUTH_ENABLED=true
-MCP_API_KEY=sk_mcp_YourGeneratedKeyHere123456789012
+MCP_API_KEY=your-generated-key-from-setup-script-here
 
 # Server Configuration (optional)
 MCP_MATH_PORT=8000
@@ -630,14 +633,14 @@ For system-wide configuration or CI/CD:
 
 **Linux/Mac (temporary, current session):**
 ```bash
-export MCP_API_KEY="sk_mcp_YourKeyHere123456789012"
+export MCP_API_KEY="your-generated-api-key-here"
 export MCP_AUTH_ENABLED=true
 ```
 
 **Linux/Mac (permanent, user profile):**
 ```bash
 # Add to ~/.bashrc or ~/.zshrc
-echo 'export MCP_API_KEY="sk_mcp_YourKeyHere"' >> ~/.bashrc
+echo 'export MCP_API_KEY="your-generated-api-key-here"' >> ~/.bashrc
 echo 'export MCP_AUTH_ENABLED=true' >> ~/.bashrc
 
 # Reload shell config
@@ -646,14 +649,14 @@ source ~/.bashrc
 
 **Windows (temporary, current session):**
 ```powershell
-$env:MCP_API_KEY="sk_mcp_YourKeyHere123456789012"
+$env:MCP_API_KEY="your-generated-api-key-here"
 $env:MCP_AUTH_ENABLED="true"
 ```
 
 **Windows (permanent, user level):**
 ```powershell
 # PowerShell (requires admin)
-[System.Environment]::SetEnvironmentVariable("MCP_API_KEY", "sk_mcp_YourKeyHere", "User")
+[System.Environment]::SetEnvironmentVariable("MCP_API_KEY", "your-generated-api-key-here", "User")
 [System.Environment]::SetEnvironmentVariable("MCP_AUTH_ENABLED", "true", "User")
 
 # Or use the setup script
@@ -761,42 +764,42 @@ The MCP servers support a dual-endpoint architecture that enables both **private
 #### Architecture Overview
 
 ```
-┌──────────────────────────────────────────────────────────────────────┐
-│                   Multi-Endpoint Architecture                         │
-├──────────────────────────────────────────────────────────────────────┤
-│                                                                       │
-│  ┌─────────────────────────────┐  ┌─────────────────────────────────┐│
-│  │     PRIVATE ENDPOINTS       │  │     PUBLIC ENDPOINTS             ││
-│  │  (Development/Testing)      │  │  (Production/Demo)               ││
-│  ├─────────────────────────────┤  ├─────────────────────────────────┤│
-│  │                             │  │                                  ││
-│  │ Visibility: Private         │  │ Visibility: Public               ││
-│  │ Auth: Disabled (default)    │  │ Auth: Required                   ││
-│  │ Access: localhost or        │  │ Access: Public URL               ││
-│  │         gh CLI port forward │  │                                  ││
-│  │                             │  │                                  ││
-│  │ Use Cases:                  │  │ Use Cases:                       ││
-│  │ • Rapid prototyping         │  │ • Production API                 ││
-│  │ • Local debugging           │  │ • Public demos                   ││
-│  │ • Internal testing          │  │ • Client integrations            ││
-│  │ • Dev without API keys      │  │ • Secure remote access           ││
-│  │                             │  │                                  ││
-│  │ Example URLs:               │  │ Example URLs:                    ││
-│  │ • Local: localhost:8000     │  │ • Codespaces (public):           ││
-│  │ • Codespaces (private):     │  │   https://...-9000.app.github.dev││
-│  │   Requires: gh codespace    │  │ • Production:                    ││
-│  │   ports forward 8000:8000   │  │   https://api.example.com        ││
-│  │                             │  │                                  ││
-│  │ Security Model:             │  │ Security Model:                  ││
-│  │ • Network isolation         │  │ • API key authentication         ││
-│  │ • Private by default        │  │ • Rate limiting                  ││
-│  │ • Fast iteration            │  │ • CORS restrictions              ││
-│  │                             │  │ • HTTPS required                 ││
-│  └─────────────────────────────┘  └─────────────────────────────────┘│
-│                                                                       │
-│  Both endpoint types serve the same MCP tools and API                │
-│  Configuration determines security posture and accessibility         │
-└──────────────────────────────────────────────────────────────────────┘
++------------------------------------------------------------------------+
+|                   Multi-Endpoint Architecture                          |
++------------------------------------------------------------------------+
+|                                                                        |
+|  +-----------------------------+  +---------------------------------+  |
+|  |     PRIVATE ENDPOINTS       |  |     PUBLIC ENDPOINTS            |  |
+|  |  (Development/Testing)      |  |  (Production/Demo)              |  |
+|  +-----------------------------+  +---------------------------------+  |
+|  |                             |  |                                 |  |
+|  | Visibility: Private         |  | Visibility: Public              |  |
+|  | Auth: Disabled (default)    |  | Auth: Required                  |  |
+|  | Access: localhost or        |  | Access: Public URL              |  |
+|  |         gh CLI port forward |  |                                 |  |
+|  |                             |  |                                 |  |
+|  | Use Cases:                  |  | Use Cases:                      |  |
+|  | - Rapid prototyping         |  | - Production API                |  |
+|  | - Local debugging           |  | - Public demos                  |  |
+|  | - Internal testing          |  | - Client integrations           |  |
+|  | - Dev without API keys      |  | - Secure remote access          |  |
+|  |                             |  |                                 |  |
+|  | Example URLs:               |  | Example URLs:                   |  |
+|  | - Local: localhost:8000     |  | - Codespaces (public):          |  |
+|  | - Codespaces (private):     |  |   https://...-9000.github.dev   |  |
+|  |   Requires: gh codespace    |  | - Production:                   |  |
+|  |   ports forward 8000:8000   |  |   https://api.example.com       |  |
+|  |                             |  |                                 |  |
+|  | Security Model:             |  | Security Model:                 |  |
+|  | - Network isolation         |  | - API key authentication        |  |
+|  | - Private by default        |  | - Rate limiting                 |  |
+|  | - Fast iteration            |  | - CORS restrictions             |  |
+|  |                             |  | - HTTPS required                |  |
+|  +-----------------------------+  +---------------------------------+  |
+|                                                                        |
+|  Both endpoint types serve the same MCP tools and API                 |
+|  Configuration determines security posture and accessibility          |
++------------------------------------------------------------------------+
 ```
 
 #### Endpoint Type Comparison
@@ -908,7 +911,7 @@ logging:
 ```bash
 # Set up environment
 export MCP_AUTH_ENABLED=true
-export MCP_API_KEY="sk_mcp_your_secure_key"
+export MCP_API_KEY="your-generated-api-key-here"
 
 # Start server with production config
 python src/math_server/server.py --transport http --port 9000 --config config.prod.yaml
@@ -4021,7 +4024,7 @@ MCP_API_KEY=your-secret-api-key-here
 MCP_AUTH_ENABLED=true
 
 # .env (never commit, in .gitignore)
-MCP_API_KEY=sk_mcp_RealSecretKey123456789012
+MCP_API_KEY=your-actual-secret-key-goes-here
 MCP_AUTH_ENABLED=true
 ```
 
@@ -4158,32 +4161,32 @@ curl https://your-server.com/metrics
 
 **Recommended Key Structure:**
 ```
-Development:     sk_mcp_dev_AbCdEf123456789012...
-Staging:         sk_mcp_stg_XyZaBc789012345678...
-Production:      sk_mcp_prod_LmNoPq345678901234...
-CI/CD:           sk_mcp_ci_QrStUv901234567890...
-Client A:        sk_mcp_clienta_WxYzAb567890...
-Client B:        sk_mcp_clientb_CdEfGh123456...
+Development:     sk_mcp_dev_EXAMPLE_REPLACE_WITH_REAL_KEY
+Staging:         sk_mcp_stg_EXAMPLE_REPLACE_WITH_REAL_KEY
+Production:      sk_mcp_prod_EXAMPLE_REPLACE_WITH_REAL_KEY
+CI/CD:           sk_mcp_ci_EXAMPLE_REPLACE_WITH_REAL_KEY
+Client A:        sk_mcp_clienta_EXAMPLE_REPLACE_WITH_REAL
+Client B:        sk_mcp_clientb_EXAMPLE_REPLACE_WITH_REAL
 ```
 
 **Key Naming Convention:**
 - Prefix: `sk_mcp_` (secret key, MCP service)
 - Environment: `dev_`, `stg_`, `prod_`, `ci_`
 - Random: 24+ character random string
-- Example: `sk_mcp_prod_AbCdEfGhIjKlMnOpQrStUvWx`
+- Example: `sk_mcp_prod_RANDOM_STRING_GENERATED_BY_SCRIPT`
 
 **Configuration per Environment:**
 
 **Development (.env.dev):**
 ```bash
-MCP_API_KEY=sk_mcp_dev_AbCdEf123456789012...
+MCP_API_KEY=sk_mcp_dev_YOUR_DEV_KEY_HERE
 MCP_AUTH_ENABLED=false  # Optional for speed
 MCP_LOG_LEVEL=DEBUG
 ```
 
 **Staging (.env.stg):**
 ```bash
-MCP_API_KEY=sk_mcp_stg_XyZaBc789012345678...
+MCP_API_KEY=sk_mcp_stg_YOUR_STAGING_KEY_HERE
 MCP_AUTH_ENABLED=true
 MCP_RATE_LIMIT_ENABLED=true
 MCP_LOG_LEVEL=INFO
@@ -4191,7 +4194,7 @@ MCP_LOG_LEVEL=INFO
 
 **Production (.env.prod):**
 ```bash
-MCP_API_KEY=sk_mcp_prod_LmNoPq345678901234...
+MCP_API_KEY=sk_mcp_prod_YOUR_PRODUCTION_KEY_HERE
 MCP_AUTH_ENABLED=true
 MCP_RATE_LIMIT_ENABLED=true
 MCP_RATE_LIMIT_RPM=60
