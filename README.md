@@ -281,7 +281,51 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 2. Quick Start - HTTP Mode
+### 2. API Key Setup (Optional but Recommended)
+
+For secure deployments, generate and configure an API key using the automated setup script:
+
+#### Quick Setup (Local Development)
+```powershell
+# Windows PowerShell - Create .env file with generated API key
+.\setup-api-key.ps1
+
+# Or set as Windows environment variable (persistent)
+.\setup-api-key.ps1 -Method envvar
+```
+
+#### GitHub Codespaces Setup
+```powershell
+# Get instructions for configuring Codespaces secrets
+.\setup-api-key.ps1 -Environment codespace
+
+# Or setup both local and Codespaces
+.\setup-api-key.ps1 -Environment both
+```
+
+**What the script does:**
+- ✅ Generates cryptographically secure 32-character API keys with `sk_mcp_` prefix
+- ✅ Automatically copies key to clipboard
+- ✅ Creates/updates `.env` file or sets environment variable
+- ✅ Verifies `.env` is in `.gitignore`
+- ✅ Installs `python-dotenv` if needed
+- ✅ Provides GitHub Codespaces configuration instructions
+- ✅ Displays verification and testing commands
+- ✅ Includes security best practices reminders
+
+**Manual Setup (Alternative):**
+```bash
+# Copy example configuration
+cp .env.example .env
+
+# Generate API key manually
+python -c "import secrets; print('sk_mcp_' + secrets.token_urlsafe(24))"
+
+# Edit .env and set MCP_API_KEY to your generated key
+# Then enable authentication: MCP_AUTH_ENABLED=true
+```
+
+### 3. Quick Start - HTTP Mode
 
 Get started quickly with HTTP transport for web clients and remote access:
 
@@ -313,7 +357,7 @@ curl http://localhost:8000/health
 - Configure security: See [Configuration Reference](#4-configuration-reference)
 - Deploy to Codespaces: See [GitHub Codespaces Setup](#-github-codespaces-setup)
 
-### 3. Configuration (Optional)
+### 4. Configuration (Optional)
 
 The servers support YAML-based configuration with environment variable overrides. By default, servers run with sensible defaults, but you can customize settings using a config file.
 
@@ -381,7 +425,7 @@ MCP_LOG_LEVEL=DEBUG python src/stats_server/server.py --config config.yaml
 python src/math_server/server.py
 ```
 
-### 4. Security Configuration (Optional)
+### 5. Security Configuration (Optional)
 
 The servers include comprehensive security features that can be enabled via configuration. See [SECURITY.md](SECURITY.md) for detailed documentation.
 
@@ -416,7 +460,7 @@ export MCP_RATE_LIMIT_RPM=60
 
 **Important**: Always use strong API keys and HTTPS in production. See [SECURITY.md](SECURITY.md) for best practices.
 
-### 5. Configuration Reference
+### 6. Configuration Reference
 
 Complete reference for all configuration options in `config.yaml`:
 
@@ -517,7 +561,7 @@ export MCP_LOG_LEVEL=DEBUG
 2. Configuration file (`config.yaml`)
 3. Default values (lowest priority)
 
-### 6. Test the Servers
+### 7. Test the Servers
 
 #### Option A: Quick Start with Launcher Scripts (HTTP Mode)
 
@@ -783,7 +827,7 @@ The repository includes pre-configured VS Code launch configurations in `.vscode
 - Verify the file you're editing is in the `src/` directory
 - Try manually restarting the server
 
-### 7. Configure with Claude Desktop
+### 8. Configure with Claude Desktop
 
 Add **both servers** to Claude Desktop's configuration file:
 
@@ -843,7 +887,7 @@ To use a configuration file with Claude Desktop, add the `--config` argument:
 }
 ```
 
-### 8. Restart Claude Desktop
+### 9. Restart Claude Desktop
 
 Completely quit Claude Desktop and restart it. Both servers should now be available with their respective tools.
 
