@@ -8,7 +8,9 @@ import argparse
 import asyncio
 import logging
 import math
+import signal
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
@@ -70,6 +72,43 @@ def set_config(config: Config) -> None:
     """Set the global configuration instance."""
     global _config
     _config = config
+
+
+class ServerState:
+    """
+    Track server operational metrics for monitoring endpoints.
+    
+    This class maintains server state including:
+    - Server start time for uptime calculation
+    - Total request count
+    - Active SSE connection count
+    - MCP initialization status
+    """
+    
+    def __init__(self):
+        """Initialize server state with default values."""
+        self.start_time = time.time()
+        self.total_requests = 0
+        self.active_connections = 0
+        self.mcp_initialized = True  # MCP is initialized when HTTP server starts
+        
+    def get_uptime_seconds(self) -> float:
+        """Get server uptime in seconds."""
+        return time.time() - self.start_time
+    
+    def increment_requests(self):
+        """Increment total request counter."""
+        self.total_requests += 1
+    
+    def increment_connections(self):
+        """Increment active connection counter."""
+        self.active_connections += 1
+    
+    def decrement_connections(self):
+        """Decrement active connection counter."""
+        if self.active_connections > 0:
+            self.active_connections -= 1
+
 
 # Constants for numerical calculations and validation
 NUMERICAL_TOLERANCE = 1e-10  # Tolerance for numerical comparisons and singularity checks
@@ -8841,8 +8880,12 @@ async def run_http_server(host: str = "0.0.0.0", port: int = 8001, config_path: 
     # Create FastAPI app
     fastapi_app = FastAPI(title="Statistical Analysis MCP Server", version="1.0.0")
     
-    # Store for SSE connections
+    # Initialize server state for monitoring
+    server_state = ServerState()
+    
+    # Store for SSE connections and their async generators
     sse_connections = []
+    sse_tasks = []
     
     @fastapi_app.get("/sse")
     async def sse_endpoint(request: Request):
@@ -8855,6 +8898,7 @@ async def run_http_server(host: str = "0.0.0.0", port: int = 8001, config_path: 
                 # Register this connection
                 connection_id = id(request)
                 sse_connections.append(connection_id)
+                server_state.increment_connections()
                 logger.info(f"New SSE connection established: {connection_id}")
                 
                 # Send initial connection message
@@ -8885,6 +8929,7 @@ async def run_http_server(host: str = "0.0.0.0", port: int = 8001, config_path: 
             finally:
                 if connection_id in sse_connections:
                     sse_connections.remove(connection_id)
+                server_state.decrement_connections()
                 logger.info(f"SSE connection closed: {connection_id}")
         
         return EventSourceResponse(event_generator())
@@ -8895,6 +8940,9 @@ async def run_http_server(host: str = "0.0.0.0", port: int = 8001, config_path: 
         JSON-RPC 2.0 endpoint for client-to-server requests.
         Handles MCP protocol messages sent from the client.
         """
+        # Track request
+        server_state.increment_requests()
+        
         try:
             # Parse JSON-RPC request
             body = await request.json()
@@ -8981,8 +9029,73 @@ async def run_http_server(host: str = "0.0.0.0", port: int = 8001, config_path: 
     
     @fastapi_app.get("/health")
     async def health_check():
-        """Health check endpoint."""
-        return {"status": "healthy", "server": "stats-server"}
+        """
+        Health check endpoint - basic liveness check.
+        Always returns 200 OK with server status and uptime.
+        """
+        return {
+            "status": "ok",
+            "server": "stats-server",
+            "uptime_seconds": round(server_state.get_uptime_seconds(), 2),
+            "timestamp": datetime.now().isoformat() + "Z"
+        }
+    
+    @fastapi_app.get("/ready")
+    async def readiness_check():
+        """
+        Readiness check endpoint - indicates if server is ready to accept requests.
+        Returns 200 if ready, 503 if not ready.
+        """
+        if server_state.mcp_initialized:
+            # Get tools count
+            tools_list = await list_tools()
+            return {
+                "status": "ready",
+                "mcp_initialized": True,
+                "tools_count": len(tools_list)
+            }
+        else:
+            return {
+                "status": "not_ready",
+                "mcp_initialized": False,
+                "tools_count": 0
+            }, 503
+    
+    @fastapi_app.get("/metrics")
+    async def metrics_endpoint():
+        """
+        Metrics endpoint - provides operational statistics.
+        Returns request counts, active connections, tools available, and uptime.
+        """
+        uptime_seconds = server_state.get_uptime_seconds()
+        tools_list = await list_tools()
+        
+        # Calculate requests per minute
+        uptime_minutes = uptime_seconds / 60.0
+        requests_per_minute = (
+            server_state.total_requests / uptime_minutes if uptime_minutes > 0 else 0.0
+        )
+        
+        return {
+            "total_requests": server_state.total_requests,
+            "active_connections": server_state.active_connections,
+            "tools_available": len(tools_list),
+            "uptime_seconds": round(uptime_seconds, 2),
+            "requests_per_minute": round(requests_per_minute, 2)
+        }
+    
+    # Graceful shutdown handler
+    shutdown_event = asyncio.Event()
+    
+    def signal_handler(signum, frame):
+        """Handle shutdown signals."""
+        sig_name = signal.Signals(signum).name
+        logger.info(f"Received signal {sig_name}, initiating graceful shutdown...")
+        shutdown_event.set()
+    
+    # Register signal handlers
+    signal.signal(signal.SIGTERM, signal_handler)
+    signal.signal(signal.SIGINT, signal_handler)
     
     # Run the FastAPI server
     config_uvicorn = uvicorn.Config(
@@ -8993,8 +9106,33 @@ async def run_http_server(host: str = "0.0.0.0", port: int = 8001, config_path: 
     )
     server = uvicorn.Server(config_uvicorn)
     
+    # Create server task
+    server_task = asyncio.create_task(server.serve())
+    
     try:
-        await server.serve()
+        # Wait for either server completion or shutdown signal
+        done, pending = await asyncio.wait(
+            [server_task, asyncio.create_task(shutdown_event.wait())],
+            return_when=asyncio.FIRST_COMPLETED
+        )
+        
+        # If shutdown was signaled, perform graceful cleanup
+        if shutdown_event.is_set():
+            logger.info("Shutting down server...")
+            logger.info(f"Closing {len(sse_connections)} active SSE connections...")
+            
+            # Signal server to shutdown
+            server.should_exit = True
+            
+            # Wait for server to shutdown (max 30 seconds)
+            try:
+                await asyncio.wait_for(server_task, timeout=30.0)
+            except asyncio.TimeoutError:
+                logger.warning("Server shutdown timed out after 30 seconds")
+            
+            logger.info("All connections closed")
+            logger.info("Shutdown complete")
+        
     except Exception as e:
         logger.error(f"Server error: {e}", exc_info=True)
         sys.exit(1)
