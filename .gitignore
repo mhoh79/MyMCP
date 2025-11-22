@@ -62,7 +62,6 @@ desktop.ini
 *.dylib
 
 # Test/validation scripts (not part of production code)
-test_config.py
 config-test-*.yaml
 
 # Server launcher process management
