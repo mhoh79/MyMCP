@@ -64,7 +64,7 @@ jobs:
 
           authentication:
             enabled: false
-            api_key: "not-required"
+            api_key: "test-key-not-used-auth-disabled-12345"
 
           rate_limiting:
             enabled: false
