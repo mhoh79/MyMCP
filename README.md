@@ -1630,6 +1630,85 @@ Add **both servers** to Claude Desktop's configuration file:
 **macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
 **Linux:** `~/.config/Claude/claude_desktop_config.json`
 
+#### Recommended Configuration (Using Wrapper Scripts)
+
+The easiest and most reliable way to configure the servers is using the provided wrapper scripts:
+
+```json
+{
+  "mcpServers": {
+    "math-tools": {
+      "command": "c:/Users/YOUR_USERNAME/path/to/MyMCP/venv/Scripts/python.exe",
+      "args": [
+        "c:/Users/YOUR_USERNAME/path/to/MyMCP/start_math_server.py"
+      ]
+    },
+    "stats-tools": {
+      "command": "c:/Users/YOUR_USERNAME/path/to/MyMCP/venv/Scripts/python.exe",
+      "args": [
+        "c:/Users/YOUR_USERNAME/path/to/MyMCP/start_stats_server.py"
+      ]
+    }
+  }
+}
+```
+
+**Platform-Specific Examples:**
+
+**Windows:**
+```json
+{
+  "mcpServers": {
+    "math-tools": {
+      "command": "c:/Users/matti/OneDrive/Github/MyMCP/venv/Scripts/python.exe",
+      "args": ["c:/Users/matti/OneDrive/Github/MyMCP/start_math_server.py"]
+    },
+    "stats-tools": {
+      "command": "c:/Users/matti/OneDrive/Github/MyMCP/venv/Scripts/python.exe",
+      "args": ["c:/Users/matti/OneDrive/Github/MyMCP/start_stats_server.py"]
+    }
+  }
+}
+```
+
+**macOS:**
+```json
+{
+  "mcpServers": {
+    "math-tools": {
+      "command": "/Users/username/MyMCP/venv/bin/python",
+      "args": ["/Users/username/MyMCP/start_math_server.py"]
+    },
+    "stats-tools": {
+      "command": "/Users/username/MyMCP/venv/bin/python",
+      "args": ["/Users/username/MyMCP/start_stats_server.py"]
+    }
+  }
+}
+```
+
+**Linux:**
+```json
+{
+  "mcpServers": {
+    "math-tools": {
+      "command": "/home/username/MyMCP/venv/bin/python",
+      "args": ["/home/username/MyMCP/start_math_server.py"]
+    },
+    "stats-tools": {
+      "command": "/home/username/MyMCP/venv/bin/python",
+      "args": ["/home/username/MyMCP/start_stats_server.py"]
+    }
+  }
+}
+```
+
+#### Alternative Configuration Methods
+
+**Option 1: Direct Script Paths with PYTHONPATH (Advanced)**
+
+If you prefer not to use wrapper scripts, you can set the `PYTHONPATH` environment variable:
+
 ```json
 {
   "mcpServers": {
@@ -1637,27 +1716,52 @@ Add **both servers** to Claude Desktop's configuration file:
       "command": "c:/Users/YOUR_USERNAME/path/to/MyMCP/venv/Scripts/python.exe",
       "args": [
         "c:/Users/YOUR_USERNAME/path/to/MyMCP/src/builtin/math_server/server.py"
-      ]
+      ],
+      "env": {
+        "PYTHONPATH": "c:/Users/YOUR_USERNAME/path/to/MyMCP"
+      }
     },
     "stats-tools": {
       "command": "c:/Users/YOUR_USERNAME/path/to/MyMCP/venv/Scripts/python.exe",
       "args": [
         "c:/Users/YOUR_USERNAME/path/to/MyMCP/src/builtin/stats_server/server.py"
-      ]
+      ],
+      "env": {
+        "PYTHONPATH": "c:/Users/YOUR_USERNAME/path/to/MyMCP"
+      }
     }
   }
 }
 ```
 
-**Important:** 
-- Replace `YOUR_USERNAME` and the path with your actual paths
-- Use forward slashes (`/`) or escaped backslashes (`\\`) in paths
-- Use absolute paths for both the Python executable and server scripts
+**Option 2: Module-Style Imports (Requires PYTHONPATH)**
+
+⚠️ **Note:** This approach requires the `env` parameter with `PYTHONPATH` set:
+
+```json
+{
+  "mcpServers": {
+    "math-tools": {
+      "command": "c:/Users/YOUR_USERNAME/path/to/MyMCP/venv/Scripts/python.exe",
+      "args": ["-m", "src.builtin.math_server"],
+      "env": {
+        "PYTHONPATH": "c:/Users/YOUR_USERNAME/path/to/MyMCP"
+      }
+    }
+  }
+}
+```
+
+**Important Notes:**
+- Replace `YOUR_USERNAME` and paths with your actual paths
+- Use **forward slashes** (`/`) in paths, even on Windows (Claude Desktop requires this)
+- Use **absolute paths** for both the Python executable and scripts
+- The wrapper scripts automatically handle Python path configuration
 - You can configure either or both servers based on your needs
 
-**With Configuration File:**
+#### With Configuration File
 
-To use a configuration file with Claude Desktop, add the `--config` argument:
+To use a custom configuration file, add the `--config` argument:
 
 ```json
 {
@@ -1665,21 +1769,56 @@ To use a configuration file with Claude Desktop, add the `--config` argument:
     "math-tools": {
       "command": "c:/Users/YOUR_USERNAME/path/to/MyMCP/venv/Scripts/python.exe",
       "args": [
-        "c:/Users/YOUR_USERNAME/path/to/MyMCP/src/builtin/math_server/server.py",
-        "--config",
-        "c:/Users/YOUR_USERNAME/path/to/MyMCP/config.yaml"
-      ]
-    },
-    "stats-tools": {
-      "command": "c:/Users/YOUR_USERNAME/path/to/MyMCP/venv/Scripts/python.exe",
-      "args": [
-        "c:/Users/YOUR_USERNAME/path/to/MyMCP/src/builtin/stats_server/server.py",
+        "c:/Users/YOUR_USERNAME/path/to/MyMCP/start_math_server.py",
         "--config",
         "c:/Users/YOUR_USERNAME/path/to/MyMCP/config.yaml"
       ]
     }
   }
 }
+```
+
+#### Troubleshooting stdio Transport Issues
+
+**Problem:** `ModuleNotFoundError: No module named 'src'`
+
+This error occurs when Python cannot find the project modules. Here are solutions:
+
+**Solution 1: Use Wrapper Scripts (Recommended)**
+- Use `start_math_server.py` or `start_stats_server.py` as shown in the recommended configuration above
+- These scripts automatically configure the Python path
+
+**Solution 2: Set PYTHONPATH**
+- Add the `env` parameter with `PYTHONPATH` in your Claude Desktop configuration
+- See "Option 1: Direct Script Paths with PYTHONPATH" above
+
+**Solution 3: Verify Paths**
+- Ensure all paths are **absolute** (not relative)
+- Use **forward slashes** (`/`) even on Windows
+- Test the command manually first:
+  ```bash
+  # Test on Windows
+  c:/Users/YOUR_USERNAME/path/to/MyMCP/venv/Scripts/python.exe c:/Users/YOUR_USERNAME/path/to/MyMCP/start_math_server.py --help
+  
+  # Test on macOS/Linux
+  /path/to/MyMCP/venv/bin/python /path/to/MyMCP/start_math_server.py --help
+  ```
+
+**Problem:** Server not appearing in Claude Desktop
+
+**Solutions:**
+1. **Verify JSON syntax** - Use a JSON validator or `python -m json.tool config.json`
+2. **Check logs** - Look in `%APPDATA%\Claude\logs\` (Windows) or `~/Library/Logs/Claude/` (macOS)
+3. **Restart Claude completely** - Quit from system tray/menu bar, don't just close the window
+4. **Test manually first** - Run the server command from terminal to verify it works
+
+**Problem:** Dependencies not installed
+
+**Solution:**
+```bash
+cd /path/to/MyMCP
+source venv/bin/activate  # or venv\Scripts\activate on Windows
+pip install -r requirements.txt
 ```
 
 ### 9. Restart Claude Desktop
