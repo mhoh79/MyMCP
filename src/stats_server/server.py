@@ -4,10 +4,14 @@ This server exposes tools for descriptive statistics, correlation analysis,
 percentile calculations, outlier detection, time series analysis, and signal processing.
 """
 
+import argparse
 import asyncio
 import logging
-from typing import Any
 import math
+import sys
+from pathlib import Path
+from typing import Any, Optional
+
 import numpy as np
 from scipy import signal as scipy_signal
 from scipy.fft import fft, fftfreq
@@ -26,13 +30,39 @@ from mcp.types import (
     INTERNAL_ERROR,
 )
 
+# Import configuration module
+try:
+    from config import load_config, Config
+except ImportError:
+    # Handle relative import for running from different locations
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+    from config import load_config, Config
+
 # Configure logging to stderr (stdout is reserved for MCP protocol messages)
+# Note: Log level will be updated based on config in main()
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     handlers=[logging.StreamHandler()],  # Logs go to stderr by default
 )
 logger = logging.getLogger("stats-server")
+
+# Global configuration instance
+_config: Optional[Config] = None
+
+
+def get_config() -> Config:
+    """Get the global configuration instance."""
+    global _config
+    if _config is None:
+        _config = Config.create_default()
+    return _config
+
+
+def set_config(config: Config) -> None:
+    """Set the global configuration instance."""
+    global _config
+    _config = config
 
 # Constants for numerical calculations and validation
 NUMERICAL_TOLERANCE = 1e-10  # Tolerance for numerical comparisons and singularity checks
@@ -8765,7 +8795,7 @@ async def handle_multivariate_regression(arguments: Any) -> CallToolResult:
         )
 
 
-async def main():
+async def main(config_path: Optional[str] = None):
     """
     Main entry point for the MCP server.
     
@@ -8776,23 +8806,89 @@ async def main():
     
     This is the standard transport for MCP servers that will be launched
     by client applications like Claude Desktop.
+    
+    Args:
+        config_path: Optional path to configuration file
     """
-    logger.info("Starting Statistical Analysis MCP server")
+    # Load configuration
+    try:
+        config = load_config(config_path)
+        set_config(config)
+        
+        # Update logging level based on configuration
+        log_level = getattr(logging, config.logging.level)
+        logger.setLevel(log_level)
+        logging.getLogger().setLevel(log_level)
+        
+        logger.info("Starting Statistical Analysis MCP server")
+        logger.info(f"Configuration loaded from: {config_path or 'defaults'}")
+        logger.info(f"Log level: {config.logging.level}")
+        
+        # Log configuration (excluding sensitive data)
+        if config_path:
+            logger.debug(f"Stats server: {config.server.stats.host}:{config.server.stats.port}")
+            logger.debug(f"Authentication: {'enabled' if config.authentication.enabled else 'disabled'}")
+            logger.debug(f"Rate limiting: {'enabled' if config.rate_limiting.enabled else 'disabled'}")
+            if config.rate_limiting.enabled:
+                logger.debug(f"Rate limit: {config.rate_limiting.requests_per_minute} req/min")
+        
+    except (FileNotFoundError, ValueError) as e:
+        logger.error(f"Configuration error: {e}")
+        logger.error("Server startup failed due to configuration errors")
+        sys.exit(1)
     
     # Run the server using stdio transport
     # This will block until the server receives a shutdown signal
-    async with stdio_server() as (read_stream, write_stream):
-        logger.info("Server started, waiting for requests...")
-        await app.run(
-            read_stream,
-            write_stream,
-            app.create_initialization_options()
-        )
+    try:
+        async with stdio_server() as (read_stream, write_stream):
+            logger.info("Server started, waiting for requests...")
+            await app.run(
+                read_stream,
+                write_stream,
+                app.create_initialization_options()
+            )
+    except Exception as e:
+        logger.error(f"Server error: {e}", exc_info=True)
+        sys.exit(1)
     
     logger.info("Server shut down successfully")
 
 
 # Entry point when running as a script
 if __name__ == "__main__":
-    # Run the async main function
-    asyncio.run(main())
+    # Parse command-line arguments
+    parser = argparse.ArgumentParser(
+        description="Statistical Analysis MCP Server",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Run with default configuration
+  python server.py
+  
+  # Run with custom configuration file
+  python server.py --config /path/to/config.yaml
+  
+  # Run with environment variable overrides
+  MCP_LOG_LEVEL=DEBUG python server.py --config config.yaml
+  
+Environment Variables:
+  MCP_STATS_HOST          Override stats server host
+  MCP_STATS_PORT          Override stats server port
+  MCP_AUTH_ENABLED        Enable/disable authentication (true/false)
+  MCP_API_KEY             Set API key
+  MCP_RATE_LIMIT_ENABLED  Enable/disable rate limiting (true/false)
+  MCP_RATE_LIMIT_RPM      Set requests per minute
+  MCP_LOG_LEVEL           Set logging level (DEBUG/INFO/WARNING/ERROR/CRITICAL)
+        """
+    )
+    parser.add_argument(
+        "--config",
+        type=str,
+        default=None,
+        help="Path to YAML configuration file (optional)"
+    )
+    
+    args = parser.parse_args()
+    
+    # Run the async main function with the config path
+    asyncio.run(main(args.config))
