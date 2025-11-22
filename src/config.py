@@ -30,6 +30,49 @@ class ServerConfig(BaseModel):
         return v
 
 
+class CustomServerConfig(BaseModel):
+    """Configuration for a custom MCP server."""
+    
+    name: str = Field(description="Unique name for the custom server")
+    module: str = Field(description="Python module path (e.g., 'custom.my_server')")
+    host: str = Field(default="0.0.0.0", description="Server host address")
+    port: int = Field(ge=1, le=65535, description="Server port")
+    enabled: bool = Field(default=True, description="Whether the server is enabled")
+    
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        """Validate server name format."""
+        if not v:
+            raise ValueError("Server name cannot be empty")
+        if not v.replace("-", "").replace("_", "").isalnum():
+            raise ValueError(
+                f"Server name '{v}' must contain only alphanumeric characters, hyphens, and underscores"
+            )
+        return v
+    
+    @field_validator("module")
+    @classmethod
+    def validate_module(cls, v: str) -> str:
+        """Validate module path format."""
+        if not v:
+            raise ValueError("Module path cannot be empty")
+        # Basic validation of module path format
+        if not all(part.isidentifier() for part in v.split(".")):
+            raise ValueError(
+                f"Module path '{v}' must be a valid Python module path (e.g., 'custom.my_server')"
+            )
+        return v
+    
+    @field_validator("host")
+    @classmethod
+    def validate_host(cls, v: str) -> str:
+        """Validate host address format."""
+        if not v:
+            raise ValueError("Host cannot be empty")
+        return v
+
+
 class ServersConfig(BaseModel):
     """Configuration for both math and stats servers."""
     
@@ -121,6 +164,49 @@ class Config(BaseSettings):
     authentication: AuthenticationConfig = Field(default_factory=AuthenticationConfig)
     rate_limiting: RateLimitingConfig = Field(default_factory=RateLimitingConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
+    custom_servers: list[CustomServerConfig] = Field(
+        default_factory=list,
+        description="List of custom MCP servers to register"
+    )
+    
+    @field_validator("custom_servers")
+    @classmethod
+    def validate_custom_servers(cls, v: list[CustomServerConfig], info: Any) -> list[CustomServerConfig]:
+        """Validate custom servers configuration."""
+        if not v:
+            return v  # Empty list is valid
+        
+        # Check for duplicate server names
+        names = [server.name for server in v]
+        duplicate_names = [name for name in names if names.count(name) > 1]
+        if duplicate_names:
+            raise ValueError(
+                f"Duplicate server names found: {', '.join(set(duplicate_names))}. "
+                "Each custom server must have a unique name."
+            )
+        
+        # Collect all ports to check for conflicts
+        builtin_ports = {8000, 8001, 9000, 9001}  # Reserved for builtin servers
+        custom_ports = [server.port for server in v if server.enabled]
+        
+        # Check for duplicate ports among custom servers
+        duplicate_ports = [port for port in custom_ports if custom_ports.count(port) > 1]
+        if duplicate_ports:
+            raise ValueError(
+                f"Duplicate ports found in custom servers: {', '.join(map(str, set(duplicate_ports)))}. "
+                "Each custom server must use a unique port."
+            )
+        
+        # Check for conflicts with builtin server ports
+        conflicting_ports = [port for port in custom_ports if port in builtin_ports]
+        if conflicting_ports:
+            raise ValueError(
+                f"Custom server ports conflict with builtin server ports: {', '.join(map(str, conflicting_ports))}. "
+                f"Ports {', '.join(map(str, sorted(builtin_ports)))} are reserved for builtin servers. "
+                "Please use different ports for custom servers."
+            )
+        
+        return v
     
     @classmethod
     def from_yaml(cls, config_path: str | Path) -> "Config":
