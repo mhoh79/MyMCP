@@ -12,10 +12,27 @@ venv/
 .git
 .github
 .vscode
-*.md
+# Exclude top-level markdown files but keep src/ documentation
+# Note: Only files matching /*.md are excluded (top-level only)
+# Files in subdirectories like src/**/*.md are included by default
+/*.md
 .dockerignore
 Dockerfile
 docker-compose.yml
 .pids
 tests/
 *.log
+# Exclude development and test scripts (not needed in container)
+# All scripts are for local development; containers run servers via Python modules
+*.ps1
+*.sh
+scripts/
+# Exclude example and test configs
+config.*.yaml
+!config.example.yaml
+# Exclude other development files
+get_custom_servers.py
+mcp-config.json
+nginx.conf
+pytest.ini
+requirements-test.txt
