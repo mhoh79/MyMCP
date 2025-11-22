@@ -210,6 +210,49 @@ export MCP_RATE_LIMIT_RPM=60
 
 ### 5. Test the Servers
 
+#### Option A: Quick Start with Launcher Scripts (HTTP Mode)
+
+Use the provided launcher scripts to start both servers in HTTP mode with one command:
+
+**Linux/Mac:**
+```bash
+# Start both servers
+./start-http-servers.sh start
+
+# Check status
+./start-http-servers.sh status
+
+# Stop servers
+./start-http-servers.sh stop
+
+# Restart servers
+./start-http-servers.sh restart
+```
+
+**Windows (PowerShell):**
+```powershell
+# Start both servers
+.\start-http-servers.ps1
+
+# Check status
+.\start-http-servers.ps1 -Status
+
+# Stop servers
+.\start-http-servers.ps1 -Stop
+
+# Restart servers
+.\start-http-servers.ps1 -Restart
+```
+
+The launcher scripts will:
+- Automatically create `config.yaml` from the example if it doesn't exist
+- Start math_server on port 8000 and stats_server on port 8001
+- Display connection URLs for localhost and GitHub Codespaces
+- Save process IDs for easy management
+- Provide colored output showing server status
+
+#### Option B: Manual Testing (stdio Mode)
+
 Run each server directly to verify they work:
 
 ```bash
