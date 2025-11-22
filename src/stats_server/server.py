@@ -1104,7 +1104,8 @@ def isolation_forest(data: list, contamination: float = 0.1, n_estimators: int =
     
     # Simple implementation of Isolation Forest
     # This is a simplified version for the purpose of this tool
-    np.random.seed(random_seed)
+    # Use modern numpy random generator API for better randomness and thread safety
+    rng = np.random.default_rng(random_seed)
     n_samples = len(X)
     n_features = len(X[0])
     
@@ -1123,7 +1124,7 @@ def isolation_forest(data: list, contamination: float = 0.1, n_estimators: int =
         for tree_idx in range(min(n_estimators, 100)):  # Limit for performance
             # Random subsample (common in Isolation Forest)
             subsample_size = min(256, n_samples)
-            subsample_indices = np.random.choice(n_samples, subsample_size, replace=False)
+            subsample_indices = rng.choice(n_samples, subsample_size, replace=False)
             subsample = X_array[subsample_indices]
             
             # Calculate path length to isolate this point
@@ -1133,7 +1134,7 @@ def isolation_forest(data: list, contamination: float = 0.1, n_estimators: int =
             
             while len(current_subsample) > 1 and path_length < max_depth:
                 # Random split
-                feature_idx = np.random.randint(0, n_features)
+                feature_idx = rng.integers(0, n_features)
                 feature_values = current_subsample[:, feature_idx]
                 
                 if len(set(feature_values)) <= 1:
@@ -1145,7 +1146,7 @@ def isolation_forest(data: list, contamination: float = 0.1, n_estimators: int =
                 if max_val - min_val < 1e-10:
                     break
                 
-                split_value = np.random.uniform(min_val, max_val)
+                split_value = rng.uniform(min_val, max_val)
                 
                 # Determine which side the point falls on
                 if point[feature_idx] < split_value:
@@ -1281,8 +1282,8 @@ def mahalanobis_distance(data: list[list[float]], threshold: float = 0.975) -> d
     # Calculate mean vector
     mean_vector = np.mean(X, axis=0)
     
-    # Calculate covariance matrix
-    cov_matrix = np.cov(X.T)
+    # Calculate covariance matrix with sample covariance (ddof=1) for statistical inference
+    cov_matrix = np.cov(X.T, ddof=1)
     
     # Check if covariance matrix is singular
     try:
