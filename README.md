@@ -286,9 +286,10 @@ pip install -r requirements.txt
 Get started quickly with HTTP transport for web clients and remote access:
 
 ```bash
-# 1. Copy example config (creates config.yaml if it doesn't exist)
+# 1. Copy example config
+# Option A: Manual copy
 cp config.example.yaml config.yaml
-# Note: The launcher script will create this automatically if missing
+# Option B: Use launcher (will auto-create if missing)
 
 # 2. Start both servers in HTTP mode
 ./start-http-servers.sh start
@@ -1216,8 +1217,11 @@ asyncio.run(call_mcp_tool())
 **Installation**: `npm install axios`
 
 ```javascript
-// Node.js with CommonJS
+// Node.js with CommonJS (require)
 const axios = require('axios');
+
+// Or with ES modules (import) - add "type": "module" to package.json
+// import axios from 'axios';
 
 async function callMCPTool() {
     // Server URL
@@ -2627,9 +2631,11 @@ openssl rand -hex 32
 # Python
 python -c "import secrets; print(secrets.token_urlsafe(32))"
 
-# PowerShell (using .NET cryptographic random generator)
-Add-Type -AssemblyName 'System.Web'
-[System.Web.Security.Membership]::GeneratePassword(32, 8)
+# PowerShell (using cryptographically secure random)
+-join ((1..32) | ForEach-Object { "{0:X2}" -f (Get-Random -Minimum 0 -Maximum 256) })
+
+# Alternative: Use Python on Windows for consistency
+python -c "import secrets; print(secrets.token_urlsafe(32))"
 ```
 
 ### HTTPS in Production
@@ -2809,10 +2815,14 @@ Comprehensive troubleshooting guide for common issues with MCP servers.
 4. **Verify port not in use by another process**:
    ```bash
    # Kill process on port 8000 (if needed)
-   # Try graceful shutdown first
-   lsof -ti:8000 | xargs kill      # Mac/Linux (SIGTERM)
-   # If process doesn't stop, force kill as last resort
-   lsof -ti:8000 | xargs kill -9   # Mac/Linux (SIGKILL)
+   # Try graceful shutdown first (SIGTERM)
+   lsof -ti:8000 | xargs kill
+   
+   # Wait 5 seconds for graceful shutdown
+   sleep 5
+   
+   # If process still running, force kill as last resort (SIGKILL)
+   lsof -ti:8000 | xargs kill -9
    ```
 
 #### CORS Errors in Browser
