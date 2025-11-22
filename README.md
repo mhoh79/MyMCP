@@ -70,9 +70,15 @@ Dedicated statistical analysis tools:
 
 ## 📋 Prerequisites
 
+### For Local Development
 - Python 3.10 or higher
 - pip (Python package manager)
 - Virtual environment (recommended)
+
+### For Docker Deployment
+- Docker 20.10 or higher
+- Docker Compose 2.0 or higher
+- (Optional) SSL certificates for production HTTPS
 
 ## 🚀 Quick Start
 
@@ -252,6 +258,263 @@ To use a configuration file with Claude Desktop, add the `--config` argument:
 ### 5. Restart Claude Desktop
 
 Completely quit Claude Desktop and restart it. Both servers should now be available with their respective tools.
+
+## 🐳 Docker Deployment
+
+For production deployments, Docker provides a containerized, scalable solution with nginx reverse proxy, SSL termination, and health checks.
+
+### Prerequisites
+
+- Docker (20.10 or higher)
+- Docker Compose (2.0 or higher)
+
+### Quick Start with Docker
+
+1. **Create Environment File**
+
+Create a `.env` file in the project root:
+
+```bash
+MCP_API_KEY=your-secure-api-key-here
+MCP_AUTH_ENABLED=true
+MCP_RATE_LIMIT_ENABLED=true
+```
+
+2. **Prepare Configuration**
+
+Copy and customize the configuration:
+
+```bash
+cp config.example.yaml config.yaml
+# Edit config.yaml with your settings
+```
+
+3. **Build and Start Services**
+
+```bash
+# Build Docker images
+docker-compose build
+
+# Start all services (math-server, stats-server, nginx)
+docker-compose up -d
+
+# View logs
+docker-compose logs -f
+
+# Check service status
+docker-compose ps
+```
+
+4. **Access the Servers**
+
+- Math Server: `http://localhost/math/` or direct `http://localhost:8000/`
+- Stats Server: `http://localhost/stats/` or direct `http://localhost:8001/`
+- Health checks: 
+  - `http://localhost:8000/health`
+  - `http://localhost:8001/health`
+  - `http://localhost:8000/metrics`
+
+### Docker Services
+
+The `docker-compose.yml` defines three services:
+
+1. **math-server**: Math Calculator MCP server on port 8000
+2. **stats-server**: Statistical Analysis MCP server on port 8001
+3. **nginx**: Reverse proxy with SSL support on ports 80/443
+
+### Architecture Benefits
+
+- **Isolation**: Each service runs in its own container
+- **Scalability**: Easy to scale individual services
+- **Health Checks**: Automatic health monitoring and restart
+- **Security**: Non-root user, isolated network
+- **SSL Termination**: HTTPS support via nginx
+- **Rate Limiting**: Built-in API rate limiting
+
+### SSL/HTTPS Configuration
+
+To enable HTTPS with nginx:
+
+1. **Generate or Obtain SSL Certificates**
+
+For development (self-signed):
+```bash
+mkdir ssl
+openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+  -keyout ssl/key.pem -out ssl/cert.pem \
+  -subj "/CN=mcp.example.com"
+```
+
+For production, use Let's Encrypt:
+```bash
+# Install certbot
+sudo apt-get install certbot
+
+# Obtain certificate
+sudo certbot certonly --standalone -d mcp.example.com
+
+# Copy to ssl directory
+cp /etc/letsencrypt/live/mcp.example.com/fullchain.pem ssl/cert.pem
+cp /etc/letsencrypt/live/mcp.example.com/privkey.pem ssl/key.pem
+```
+
+2. **Update nginx.conf**
+
+Edit `nginx.conf` and replace `mcp.example.com` with your domain.
+
+3. **Restart nginx**
+
+```bash
+docker-compose restart nginx
+```
+
+### Docker Commands
+
+```bash
+# Build images
+docker-compose build
+
+# Start services in background
+docker-compose up -d
+
+# Start with rebuild
+docker-compose up -d --build
+
+# View logs (all services)
+docker-compose logs -f
+
+# View logs (specific service)
+docker-compose logs -f math-server
+
+# Stop services
+docker-compose down
+
+# Stop and remove volumes
+docker-compose down -v
+
+# Restart a service
+docker-compose restart math-server
+
+# Scale a service (if needed)
+docker-compose up -d --scale math-server=3
+```
+
+### Configuration in Docker
+
+Environment variables can be set in three ways:
+
+1. **`.env` file** (recommended for secrets):
+```env
+MCP_API_KEY=your-secure-api-key
+MCP_AUTH_ENABLED=true
+```
+
+2. **docker-compose.yml** environment section:
+```yaml
+environment:
+  - MCP_LOG_LEVEL=DEBUG
+  - MCP_RATE_LIMIT_RPM=120
+```
+
+3. **Command line**:
+```bash
+MCP_API_KEY=test docker-compose up -d
+```
+
+### Production Deployment Checklist
+
+- [ ] Set strong API key in `.env`
+- [ ] Enable authentication (`MCP_AUTH_ENABLED=true`)
+- [ ] Configure CORS origins restrictively in `config.yaml`
+- [ ] Set up SSL certificates for nginx
+- [ ] Configure log rotation
+- [ ] Set up monitoring (Prometheus, Grafana)
+- [ ] Configure backup strategy for configuration
+- [ ] Set resource limits (CPU, memory) in docker-compose.yml
+- [ ] Enable container security scanning
+- [ ] Document incident response procedures
+- [ ] Configure firewall rules
+- [ ] Set up automated backups
+- [ ] Test disaster recovery procedures
+
+### Resource Limits
+
+Add resource constraints to docker-compose.yml:
+
+```yaml
+services:
+  math-server:
+    # ... other config ...
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+```
+
+### Monitoring
+
+Access metrics endpoints:
+
+```bash
+# Math server metrics
+curl http://localhost:8000/metrics
+
+# Stats server metrics
+curl http://localhost:8001/metrics
+
+# Health checks
+curl http://localhost:8000/health
+curl http://localhost:8001/health
+
+# Readiness checks
+curl http://localhost:8000/ready
+curl http://localhost:8001/ready
+```
+
+### Troubleshooting
+
+**Containers not starting:**
+```bash
+# Check logs
+docker-compose logs
+
+# Check container status
+docker-compose ps
+
+# Inspect specific container
+docker inspect mcp-math-server
+```
+
+**Health check failures:**
+```bash
+# Test health endpoint directly
+docker exec mcp-math-server curl http://localhost:8000/health
+
+# Check container logs
+docker logs mcp-math-server
+```
+
+**Network issues:**
+```bash
+# Verify network
+docker network ls
+docker network inspect mymcp_mcp-network
+
+# Test connectivity between containers
+docker exec mcp-nginx ping math-server
+```
+
+### GitHub Codespaces Deployment
+
+The Docker setup works seamlessly in GitHub Codespaces:
+
+1. Codespaces automatically forwards ports 8000, 8001, 80, 443
+2. Access via Codespaces URL: `https://<codespace-name>-8000.app.github.dev`
+3. No SSL configuration needed (Codespaces handles HTTPS)
 
 ## 💡 Usage Examples
 
@@ -1256,12 +1519,20 @@ MyMCP/
 │   ├── math_server/             # Mathematical tools MCP server
 │   │   ├── __init__.py          # Package initialization
 │   │   └── server.py            # Math calculator server implementation
-│   └── stats_server/            # Statistical analysis MCP server
-│       ├── __init__.py          # Package initialization
-│       └── server.py            # Statistical tools server implementation
+│   ├── stats_server/            # Statistical analysis MCP server
+│   │   ├── __init__.py          # Package initialization
+│   │   └── server.py            # Statistical tools server implementation
+│   └── config.py                # Configuration management module
 ├── venv/                        # Virtual environment (created during setup)
+├── ssl/                         # SSL certificates directory (for Docker)
+├── .dockerignore                # Docker build exclusions
 ├── .env.example                 # Environment variable template
 ├── .gitignore                   # Git ignore patterns
+├── config.example.yaml          # Example configuration file
+├── config.yaml                  # User configuration (not in git)
+├── docker-compose.yml           # Docker Compose orchestration
+├── Dockerfile                   # Docker image definition
+├── nginx.conf                   # Nginx reverse proxy configuration
 ├── requirements.txt             # Python dependencies
 ├── mcp-config.json             # MCP Inspector config (for testing)
 └── README.md                    # This file

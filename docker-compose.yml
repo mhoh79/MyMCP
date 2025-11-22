@@ -1,0 +1,66 @@
+version: '3.8'
+
+services:
+  math-server:
+    build: .
+    container_name: mcp-math-server
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+    environment:
+      - MCP_AUTH_ENABLED=true
+      - MCP_API_KEY=${MCP_API_KEY}
+      - MCP_RATE_LIMIT_ENABLED=true
+    command: python src/math_server/server.py --transport http --host 0.0.0.0 --port 8000 --config config.yaml
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - mcp-network
+
+  stats-server:
+    build: .
+    container_name: mcp-stats-server
+    ports:
+      - "8001:8001"
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+    environment:
+      - MCP_AUTH_ENABLED=true
+      - MCP_API_KEY=${MCP_API_KEY}
+      - MCP_RATE_LIMIT_ENABLED=true
+    command: python src/stats_server/server.py --transport http --host 0.0.0.0 --port 8001 --config config.yaml
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - mcp-network
+
+  nginx:
+    image: nginx:alpine
+    container_name: mcp-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - math-server
+      - stats-server
+    restart: unless-stopped
+    networks:
+      - mcp-network
+
+networks:
+  mcp-network:
+    driver: bridge
