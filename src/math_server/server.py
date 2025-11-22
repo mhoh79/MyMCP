@@ -10,6 +10,7 @@ import asyncio
 import base64
 import hashlib
 import logging
+import os
 import re
 import signal
 import sys
@@ -5108,31 +5109,25 @@ async def run_http_server(host: str = "0.0.0.0", port: int = 8000, config_path: 
     signal.signal(signal.SIGTERM, signal_handler)
     signal.signal(signal.SIGINT, signal_handler)
     
-    # Run the FastAPI server
+    # Set up uvicorn configuration
     if dev_mode:
-        # Development mode: use uvicorn.run with reload
-        # Note: In dev mode, we need to use uvicorn.run directly which blocks
-        logger.info("🔥 Development mode enabled - hot-reload active")
-        logger.info(f"Watching directory: src/")
-        logger.info(f"Server will restart automatically on code changes")
+        # Development mode: Enable debug logging
+        logger.info("🔥 Development mode enabled - debug logging active")
+        logger.warning("Dev mode is for development only - do not use in production!")
+        logger.info("For hot-reload, use VS Code debug configs")
         
-        # Prepare uvicorn config for dev mode
-        uvicorn.run(
-            fastapi_app,
-            host=host,
-            port=port,
-            reload=True,
-            reload_dirs=["src"],
-            log_level="debug"
-        )
-        return  # uvicorn.run blocks, so we return after it exits
+        # Set up logging for debug
+        logging.getLogger().setLevel(logging.DEBUG)
+        logger.setLevel(logging.DEBUG)
+        log_level = "debug"
+    else:
+        log_level = "info"
     
-    # Production mode: normal async server
     config_uvicorn = uvicorn.Config(
         fastapi_app,
         host=host,
         port=port,
-        log_level="info"
+        log_level=log_level
     )
     server = uvicorn.Server(config_uvicorn)
     
