@@ -52,8 +52,11 @@ port_in_use() {
         netstat -tuln | grep -q ":$port "
     else
         # Fallback: try to bind to the port
+        # If bind succeeds (exit 0), port is available, so we return 1 (port NOT in use)
+        # If bind fails (exit 1), port is in use, so we return 0 (port IS in use)
         python3 -c "import socket; s = socket.socket(socket.AF_INET, socket.SOCK_STREAM); s.bind(('', $port)); s.close()" 2>/dev/null
-        return $?
+        # Invert the exit code
+        return $(( $? == 0 ? 1 : 0 ))
     fi
 }
 
