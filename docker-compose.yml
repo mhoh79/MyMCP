@@ -1,3 +1,16 @@
+# Define reusable configurations
+x-mcp-healthcheck: &mcp-healthcheck
+  test: ["CMD-SHELL", "curl -f http://localhost:$$HEALTHCHECK_PORT/health || exit 1"]
+  interval: 30s
+  timeout: 5s
+  retries: 3
+  start_period: 10s
+
+x-mcp-environment: &mcp-environment
+  MCP_AUTH_ENABLED: true
+  MCP_API_KEY: ${MCP_API_KEY}
+  MCP_RATE_LIMIT_ENABLED: true
+
 services:
   math-server:
     build: .
@@ -7,17 +20,11 @@ services:
     volumes:
       - ./config.yaml:/app/config.yaml:ro
     environment:
-      - MCP_AUTH_ENABLED=true
-      - MCP_API_KEY=${MCP_API_KEY}
-      - MCP_RATE_LIMIT_ENABLED=true
-      - HEALTHCHECK_PORT=8000
+      <<: *mcp-environment
+      HEALTHCHECK_PORT: 8000
     command: python src/math_server/server.py --transport http --host 0.0.0.0 --port 8000 --config config.yaml
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:$$HEALTHCHECK_PORT/health || exit 1"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
+      <<: *mcp-healthcheck
     restart: unless-stopped
     networks:
       - mcp-network
@@ -30,17 +37,11 @@ services:
     volumes:
       - ./config.yaml:/app/config.yaml:ro
     environment:
-      - MCP_AUTH_ENABLED=true
-      - MCP_API_KEY=${MCP_API_KEY}
-      - MCP_RATE_LIMIT_ENABLED=true
-      - HEALTHCHECK_PORT=8001
+      <<: *mcp-environment
+      HEALTHCHECK_PORT: 8001
     command: python src/stats_server/server.py --transport http --host 0.0.0.0 --port 8001 --config config.yaml
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:$$HEALTHCHECK_PORT/health || exit 1"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
+      <<: *mcp-healthcheck
     restart: unless-stopped
     networks:
       - mcp-network
