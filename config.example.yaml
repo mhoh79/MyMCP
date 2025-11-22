@@ -77,6 +77,38 @@ logging:
   # - CRITICAL: Critical messages for severe errors
   level: "INFO"
 
+# Custom Servers Configuration
+# ================================
+# Register custom MCP servers with explicit configuration
+# These servers must be created in the src/custom/ directory
+custom_servers:
+  # Example custom server configuration (uncomment to use)
+  # - name: my-server
+  #   module: custom.my_server.server
+  #   host: 0.0.0.0
+  #   port: 8002
+  #   enabled: true
+  #
+  # - name: another-server
+  #   module: custom.another_server.server
+  #   host: 0.0.0.0
+  #   port: 8003
+  #   enabled: false
+  #
+  # Configuration Requirements:
+  # - name: Unique identifier (alphanumeric, hyphens, underscores)
+  # - module: Python module path (e.g., 'custom.my_server.server')
+  # - host: Host address (default: 0.0.0.0)
+  # - port: Port number (1-65535, avoid 8000-8001, 9000-9001)
+  # - enabled: Whether to start this server (default: true)
+  #
+  # Validation Rules:
+  # - Server names must be unique
+  # - Ports must be unique across all custom servers
+  # - Ports 8000-8001 reserved for math/stats servers
+  # - Ports 9000-9001 reserved for builtin servers
+  # - Module path must be a valid Python module
+
 # Environment Variable Overrides
 # ================================
 # You can override any configuration value using environment variables:
