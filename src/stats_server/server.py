@@ -9,6 +9,7 @@ import asyncio
 import logging
 import math
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
@@ -29,6 +30,12 @@ from mcp.types import (
     INVALID_PARAMS,
     INTERNAL_ERROR,
 )
+
+# HTTP transport imports
+from fastapi import FastAPI, Request
+import uvicorn
+from sse_starlette.sse import EventSourceResponse
+import json
 
 # Import configuration module
 # Add parent directory to path to import config module
@@ -8795,9 +8802,207 @@ async def handle_multivariate_regression(arguments: Any) -> CallToolResult:
         )
 
 
-async def main(config_path: Optional[str] = None):
+async def run_http_server(host: str = "0.0.0.0", port: int = 8001, config_path: Optional[str] = None):
     """
-    Main entry point for the MCP server.
+    Run the server using HTTP/SSE transport.
+    
+    This function starts the server using FastAPI with:
+    - SSE endpoint at /sse for server-to-client messages
+    - POST endpoint at /messages for client-to-server JSON-RPC requests
+    
+    This allows remote access from tools like GitHub Codespaces while
+    maintaining the MCP protocol over HTTP.
+    
+    Args:
+        host: Host to bind to (default: 0.0.0.0)
+        port: Port to bind to (default: 8001)
+        config_path: Optional path to configuration file
+    """
+    # Load configuration
+    try:
+        config = load_config(config_path)
+        set_config(config)
+        
+        # Update logging level based on configuration
+        log_level = getattr(logging, config.logging.level)
+        logger.setLevel(log_level)
+        logging.getLogger().setLevel(log_level)
+        
+        logger.info("Starting Statistical Analysis MCP server (HTTP mode)")
+        logger.info(f"Configuration loaded from: {config_path or 'defaults'}")
+        logger.info(f"Log level: {config.logging.level}")
+        logger.info(f"Server will listen on {host}:{port}")
+        
+    except (FileNotFoundError, ValueError) as e:
+        logger.error(f"Configuration error: {e}")
+        logger.error("Server startup failed due to configuration errors")
+        sys.exit(1)
+    
+    # Create FastAPI app
+    fastapi_app = FastAPI(title="Statistical Analysis MCP Server", version="1.0.0")
+    
+    # Store for SSE connections
+    sse_connections = []
+    
+    @fastapi_app.get("/sse")
+    async def sse_endpoint(request: Request):
+        """
+        Server-Sent Events endpoint for streaming server-to-client messages.
+        This endpoint streams MCP protocol messages from the server to the client.
+        """
+        async def event_generator():
+            try:
+                # Register this connection
+                connection_id = id(request)
+                sse_connections.append(connection_id)
+                logger.info(f"New SSE connection established: {connection_id}")
+                
+                # Send initial connection message
+                yield {
+                    "event": "connected",
+                    "data": json.dumps({"status": "connected", "server": "stats-server"})
+                }
+                
+                # Keep the connection alive and send events
+                while True:
+                    # Check if client disconnected
+                    if await request.is_disconnected():
+                        logger.info(f"SSE connection disconnected: {connection_id}")
+                        break
+                    
+                    # Send keepalive ping every 30 seconds
+                    yield {
+                        "event": "ping",
+                        "data": json.dumps({"timestamp": datetime.now().isoformat()})
+                    }
+                    
+                    await asyncio.sleep(30)
+                    
+            except asyncio.CancelledError:
+                logger.info(f"SSE connection cancelled: {connection_id}")
+            except Exception as e:
+                logger.error(f"Error in SSE endpoint: {e}", exc_info=True)
+            finally:
+                if connection_id in sse_connections:
+                    sse_connections.remove(connection_id)
+                logger.info(f"SSE connection closed: {connection_id}")
+        
+        return EventSourceResponse(event_generator())
+    
+    @fastapi_app.post("/messages")
+    async def messages_endpoint(request: Request):
+        """
+        JSON-RPC 2.0 endpoint for client-to-server requests.
+        Handles MCP protocol messages sent from the client.
+        """
+        try:
+            # Parse JSON-RPC request
+            body = await request.json()
+            logger.debug(f"Received JSON-RPC request: {body}")
+            
+            # Validate JSON-RPC 2.0 format
+            if "jsonrpc" not in body or body["jsonrpc"] != "2.0":
+                return {
+                    "jsonrpc": "2.0",
+                    "error": {
+                        "code": -32600,
+                        "message": "Invalid Request: missing or invalid jsonrpc version"
+                    },
+                    "id": body.get("id")
+                }
+            
+            method = body.get("method")
+            params = body.get("params", {})
+            request_id = body.get("id")
+            
+            # Handle different MCP methods
+            if method == "initialize":
+                result = {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {
+                        "tools": {}
+                    },
+                    "serverInfo": {
+                        "name": "stats-server",
+                        "version": "1.0.0"
+                    }
+                }
+            elif method == "tools/list":
+                # Return list of available tools
+                tools_list = await list_tools()
+                result = {"tools": [tool.model_dump() for tool in tools_list]}
+            elif method == "tools/call":
+                # Call a specific tool
+                tool_name = params.get("name")
+                tool_arguments = params.get("arguments", {})
+                
+                # Execute the tool
+                tool_result = await call_tool(tool_name, tool_arguments)
+                result = {
+                    "content": [content.model_dump() for content in tool_result.content],
+                    "isError": tool_result.isError
+                }
+            else:
+                return {
+                    "jsonrpc": "2.0",
+                    "error": {
+                        "code": -32601,
+                        "message": f"Method not found: {method}"
+                    },
+                    "id": request_id
+                }
+            
+            # Return successful response
+            return {
+                "jsonrpc": "2.0",
+                "result": result,
+                "id": request_id
+            }
+            
+        except json.JSONDecodeError:
+            return {
+                "jsonrpc": "2.0",
+                "error": {
+                    "code": -32700,
+                    "message": "Parse error: invalid JSON"
+                },
+                "id": None
+            }
+        except Exception as e:
+            logger.error(f"Error handling message: {e}", exc_info=True)
+            return {
+                "jsonrpc": "2.0",
+                "error": {
+                    "code": -32603,
+                    "message": f"Internal error: {str(e)}"
+                },
+                "id": body.get("id") if isinstance(body, dict) else None
+            }
+    
+    @fastapi_app.get("/health")
+    async def health_check():
+        """Health check endpoint."""
+        return {"status": "healthy", "server": "stats-server"}
+    
+    # Run the FastAPI server
+    config_uvicorn = uvicorn.Config(
+        fastapi_app,
+        host=host,
+        port=port,
+        log_level="info"
+    )
+    server = uvicorn.Server(config_uvicorn)
+    
+    try:
+        await server.serve()
+    except Exception as e:
+        logger.error(f"Server error: {e}", exc_info=True)
+        sys.exit(1)
+
+
+async def run_stdio_server(config_path: Optional[str] = None):
+    """
+    Run the server using stdio transport.
     
     This function starts the server using stdio transport, which means:
     - The server reads MCP protocol messages from stdin
@@ -8862,11 +9067,17 @@ if __name__ == "__main__":
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Run with default configuration
+  # Run with default configuration (stdio mode)
   python server.py
+  
+  # Run in HTTP mode
+  python server.py --transport http --host 0.0.0.0 --port 8001
   
   # Run with custom configuration file
   python server.py --config /path/to/config.yaml
+  
+  # Run in HTTP mode with custom configuration
+  python server.py --transport http --host 127.0.0.1 --port 8081 --config config.yaml
   
   # Run with environment variable overrides
   MCP_LOG_LEVEL=DEBUG python server.py --config config.yaml
@@ -8887,8 +9098,30 @@ Environment Variables:
         default=None,
         help="Path to YAML configuration file (optional)"
     )
+    parser.add_argument(
+        "--transport",
+        type=str,
+        choices=["stdio", "http"],
+        default="stdio",
+        help="Transport mode: stdio (default, for Claude Desktop) or http (for remote access)"
+    )
+    parser.add_argument(
+        "--host",
+        type=str,
+        default="0.0.0.0",
+        help="Host to bind to in HTTP mode (default: 0.0.0.0)"
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=8001,
+        help="Port to bind to in HTTP mode (default: 8001)"
+    )
     
     args = parser.parse_args()
     
-    # Run the async main function with the config path
-    asyncio.run(main(args.config))
+    # Run the appropriate server mode
+    if args.transport == "http":
+        asyncio.run(run_http_server(args.host, args.port, args.config))
+    else:
+        asyncio.run(run_stdio_server(args.config))
