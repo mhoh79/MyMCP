@@ -14,8 +14,6 @@ Features:
 
 import logging
 import time
-from collections import defaultdict
-from datetime import datetime
 from typing import Callable, Dict, Optional
 
 from fastapi import FastAPI, Request, Response
@@ -26,6 +24,32 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from config import Config
 
 logger = logging.getLogger(__name__)
+
+
+def get_client_ip(request: Request) -> str:
+    """
+    Extract client IP address from request.
+    
+    Handles X-Forwarded-For header for proxied requests.
+    This is a shared utility used by multiple middleware classes.
+    
+    Args:
+        request: HTTP request
+        
+    Returns:
+        Client IP address as string
+    """
+    # Check for X-Forwarded-For header (common with proxies/load balancers)
+    forwarded_for = request.headers.get("X-Forwarded-For")
+    if forwarded_for:
+        # Take the first IP in the chain (original client)
+        return forwarded_for.split(",")[0].strip()
+    
+    # Fall back to direct client IP
+    if request.client:
+        return request.client.host
+    
+    return "unknown"
 
 
 class TokenBucket:
@@ -193,8 +217,11 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self.enabled = config.rate_limiting.enabled
         self.requests_per_minute = config.rate_limiting.requests_per_minute
         
-        # Token bucket for each client IP
+        # Token bucket for each client IP (with cleanup of old entries)
         self.buckets: Dict[str, TokenBucket] = {}
+        self.max_buckets = 10000  # Limit to prevent memory leaks
+        self.last_cleanup = time.time()
+        self.cleanup_interval = 3600  # Clean up every hour
         
         # Calculate bucket parameters
         # Capacity = requests per minute (allows bursts)
@@ -207,29 +234,32 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         else:
             logger.info("Rate limiting disabled")
     
-    def get_client_ip(self, request: Request) -> str:
+
+    def cleanup_old_buckets(self) -> None:
         """
-        Extract client IP address from request.
+        Clean up inactive buckets to prevent memory leaks.
         
-        Handles X-Forwarded-For header for proxied requests.
-        
-        Args:
-            request: HTTP request
-            
-        Returns:
-            Client IP address as string
+        Removes buckets that haven't been accessed recently or if we exceed
+        the maximum bucket count.
         """
-        # Check for X-Forwarded-For header (common with proxies/load balancers)
-        forwarded_for = request.headers.get("X-Forwarded-For")
-        if forwarded_for:
-            # Take the first IP in the chain
-            return forwarded_for.split(",")[0].strip()
+        now = time.time()
         
-        # Fall back to direct client IP
-        if request.client:
-            return request.client.host
+        # Only cleanup periodically
+        if now - self.last_cleanup < self.cleanup_interval:
+            return
         
-        return "unknown"
+        self.last_cleanup = now
+        
+        # If we're over the limit, remove oldest buckets
+        if len(self.buckets) > self.max_buckets:
+            # Sort by last refill time and keep only the most recent
+            sorted_buckets = sorted(
+                self.buckets.items(),
+                key=lambda x: x[1].last_refill,
+                reverse=True
+            )
+            self.buckets = dict(sorted_buckets[:self.max_buckets // 2])
+            logger.info(f"Cleaned up old rate limit buckets, now tracking {len(self.buckets)} IPs")
     
     def get_bucket(self, client_ip: str) -> TokenBucket:
         """
@@ -241,6 +271,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         Returns:
             TokenBucket instance for this client
         """
+        # Periodic cleanup
+        self.cleanup_old_buckets()
+        
         if client_ip not in self.buckets:
             self.buckets[client_ip] = TokenBucket(
                 capacity=self.bucket_capacity,
@@ -269,7 +302,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
         
         # Get client IP and token bucket
-        client_ip = self.get_client_ip(request)
+        client_ip = get_client_ip(request)
         bucket = self.get_bucket(client_ip)
         
         # Try to consume a token
@@ -278,8 +311,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             logger.warning(f"Rate limit exceeded for {client_ip} on {request.url.path}")
             
             # Calculate retry-after time
-            # Time to accumulate one token
-            retry_after = int(60.0 / self.refill_rate)
+            # Time to accumulate one token (in seconds)
+            retry_after = int(1.0 / self.refill_rate) if self.refill_rate > 0 else 60
             
             return JSONResponse(
                 status_code=429,
@@ -336,10 +369,8 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         Returns:
             Response from next handler
         """
-        # Get client IP
-        client_ip = request.headers.get("X-Forwarded-For", "unknown")
-        if client_ip == "unknown" and request.client:
-            client_ip = request.client.host
+        # Get client IP using shared utility
+        client_ip = get_client_ip(request)
         
         # Record start time
         start_time = time.time()
