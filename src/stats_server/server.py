@@ -1,13 +1,17 @@
 """
 Main MCP server implementation for statistical analysis.
 This server exposes tools for descriptive statistics, correlation analysis, 
-percentile calculations, and outlier detection.
+percentile calculations, outlier detection, time series analysis, and signal processing.
 """
 
 import asyncio
 import logging
 from typing import Any
 import math
+import numpy as np
+from scipy import signal as scipy_signal
+from scipy.fft import fft, fftfreq
+from scipy import stats as scipy_stats
 
 # MCP SDK imports for building the server
 from mcp.server import Server
@@ -2332,6 +2336,2129 @@ def multivariate_regression(X: list[list[float]], y: list[float], variable_names
 
 # ============================================================================
 # MCP Server Setup
+# Signal Processing Functions
+# ============================================================================
+
+
+def fft_analysis(signal_data: list[float], sample_rate: float, window: str = "hanning", detrend: bool = True) -> dict[str, Any]:
+    """
+    Perform Fast Fourier Transform (FFT) analysis for frequency domain analysis.
+    
+    Used for bearing defect detection, motor electrical faults, gearbox analysis,
+    pump cavitation detection, and vibration analysis.
+    
+    Args:
+        signal_data: Time-domain signal (vibration, current, acoustic, etc.), min 8 items
+        sample_rate: Sampling frequency in Hz (1-1000000)
+        window: Windowing function - "hanning", "hamming", "blackman", "rectangular" (default: "hanning")
+        detrend: Remove DC component and linear trends (default: True)
+        
+    Returns:
+        Dictionary containing:
+        - 'sample_rate': Input sample rate
+        - 'signal_length': Number of samples
+        - 'duration_seconds': Signal duration
+        - 'frequencies': Frequency array up to Nyquist
+        - 'magnitudes': Magnitude spectrum
+        - 'dominant_frequencies': Top frequency peaks with magnitudes
+        - 'nyquist_frequency': Maximum frequency (sample_rate/2)
+        - 'resolution': Frequency resolution (Hz per bin)
+        - 'interpretation': Analysis interpretation
+        
+    Raises:
+        ValueError: If validation fails
+        
+    Examples:
+        fft_analysis([...], 10000, "hanning", True)
+        >>> Dominant frequencies at 60 Hz, 120 Hz (electrical harmonics)
+    """
+    # Validate input
+    if not isinstance(signal_data, list):
+        raise ValueError(f"signal_data must be a list, got {type(signal_data).__name__}")
+    
+    if len(signal_data) < 8:
+        raise ValueError("signal_data must contain at least 8 items")
+    
+    # Validate all elements are numeric
+    for i, value in enumerate(signal_data):
+        if not isinstance(value, (int, float)):
+            raise ValueError(f"All signal values must be numeric. Item at index {i} is {type(value).__name__}: {value}")
+    
+    # Validate sample_rate
+    if not isinstance(sample_rate, (int, float)):
+        raise ValueError(f"sample_rate must be numeric, got {type(sample_rate).__name__}")
+    
+    if sample_rate < 1 or sample_rate > 1000000:
+        raise ValueError(f"sample_rate must be between 1 and 1000000 Hz, got {sample_rate}")
+    
+    # Validate window type
+    valid_windows = ["hanning", "hamming", "blackman", "rectangular"]
+    if window not in valid_windows:
+        raise ValueError(f"window must be one of {valid_windows}, got '{window}'")
+    
+    # Convert to numpy array
+    signal_array = np.array(signal_data, dtype=float)
+    n = len(signal_array)
+    
+    # Detrend if requested (remove DC and linear trend)
+    if detrend:
+        signal_array = scipy_signal.detrend(signal_array)
+    
+    # Apply window function to reduce spectral leakage
+    if window == "hanning":
+        window_func = scipy_signal.windows.hann(n)
+    elif window == "hamming":
+        window_func = scipy_signal.windows.hamming(n)
+    elif window == "blackman":
+        window_func = scipy_signal.windows.blackman(n)
+    else:  # rectangular
+        window_func = np.ones(n)
+    
+    windowed_signal = signal_array * window_func
+    
+    # Perform FFT
+    fft_result = fft(windowed_signal)
+    
+    # Get frequency bins (only positive frequencies up to Nyquist)
+    freqs = fftfreq(n, 1.0 / sample_rate)
+    
+    # Take only positive frequencies (up to Nyquist frequency)
+    nyquist_idx = n // 2
+    freqs_positive = freqs[:nyquist_idx]
+    
+    # Calculate magnitude spectrum (scaled properly)
+    magnitudes = np.abs(fft_result[:nyquist_idx]) * 2.0 / n
+    
+    # Nyquist frequency and resolution
+    nyquist_freq = sample_rate / 2.0
+    freq_resolution = sample_rate / n
+    duration_seconds = n / sample_rate
+    
+    # Find dominant frequencies (top 10 peaks)
+    # Use peak detection to find local maxima
+    peaks, properties = scipy_signal.find_peaks(magnitudes, height=0, prominence=np.max(magnitudes) * 0.05)
+    
+    # Sort peaks by magnitude (descending)
+    if len(peaks) > 0:
+        peak_mags = magnitudes[peaks]
+        sorted_indices = np.argsort(peak_mags)[::-1]
+        top_peaks = peaks[sorted_indices[:10]]
+        top_mags = peak_mags[sorted_indices[:10]]
+        
+        dominant_frequencies = []
+        for peak_idx, mag in zip(top_peaks, top_mags):
+            freq = freqs_positive[peak_idx]
+            # Provide interpretation hints for common frequencies
+            interpretation = ""
+            if 59 <= freq <= 61:
+                interpretation = "Electrical line frequency (60 Hz)"
+            elif 119 <= freq <= 121:
+                interpretation = "Second harmonic (120 Hz)"
+            elif 179 <= freq <= 181:
+                interpretation = "Third harmonic (180 Hz)"
+            elif freq > 1000:
+                interpretation = "High frequency component (possible bearing defect)"
+            
+            dominant_frequencies.append({
+                'frequency': float(freq),
+                'magnitude': float(mag),
+                'interpretation': interpretation
+            })
+    else:
+        dominant_frequencies = []
+    
+    # Generate interpretation
+    interpretation = ""
+    if len(dominant_frequencies) > 0:
+        top_freq = dominant_frequencies[0]['frequency']
+        if 59 <= top_freq <= 61:
+            interpretation = "Strong electrical line frequency component detected. Check for electromagnetic interference."
+        elif top_freq > 1000:
+            interpretation = "High frequency energy detected. May indicate bearing defects or gear mesh issues."
+        else:
+            interpretation = f"Dominant frequency at {top_freq:.1f} Hz."
+    else:
+        interpretation = "No significant frequency peaks detected. Signal may be primarily noise."
+    
+    return {
+        'sample_rate': float(sample_rate),
+        'signal_length': n,
+        'duration_seconds': float(duration_seconds),
+        'frequencies': freqs_positive.tolist(),
+        'magnitudes': magnitudes.tolist(),
+        'dominant_frequencies': dominant_frequencies,
+        'nyquist_frequency': float(nyquist_freq),
+        'resolution': float(freq_resolution),
+        'interpretation': interpretation
+    }
+
+
+def power_spectral_density(signal_data: list[float], sample_rate: float, method: str = "welch", nperseg: int = 256) -> dict[str, Any]:
+    """
+    Calculate Power Spectral Density (PSD) for energy distribution across frequencies.
+    
+    Used for vibration energy distribution, noise level assessment, and random vibration analysis.
+    
+    Args:
+        signal_data: Time-domain signal, min 16 items
+        sample_rate: Sampling frequency in Hz
+        method: PSD estimation method - "welch" or "periodogram" (default: "welch")
+        nperseg: Length of each segment for Welch method (default: 256)
+        
+    Returns:
+        Dictionary containing:
+        - 'method': Method used
+        - 'frequencies': Frequency array
+        - 'psd': Power spectral density values
+        - 'total_power': Total power in signal
+        - 'peak_frequency': Frequency with maximum power
+        - 'peak_power': Maximum power value
+        - 'interpretation': Analysis interpretation
+        
+    Raises:
+        ValueError: If validation fails
+    """
+    # Validate input
+    if not isinstance(signal_data, list):
+        raise ValueError(f"signal_data must be a list, got {type(signal_data).__name__}")
+    
+    if len(signal_data) < 16:
+        raise ValueError("signal_data must contain at least 16 items")
+    
+    # Validate all elements are numeric
+    for i, value in enumerate(signal_data):
+        if not isinstance(value, (int, float)):
+            raise ValueError(f"All signal values must be numeric. Item at index {i} is {type(value).__name__}: {value}")
+    
+    # Validate sample_rate
+    if not isinstance(sample_rate, (int, float)):
+        raise ValueError(f"sample_rate must be numeric, got {type(sample_rate).__name__}")
+    
+    if sample_rate <= 0:
+        raise ValueError(f"sample_rate must be positive, got {sample_rate}")
+    
+    # Validate method
+    if method not in ["welch", "periodogram"]:
+        raise ValueError(f"method must be 'welch' or 'periodogram', got '{method}'")
+    
+    # Validate nperseg
+    if not isinstance(nperseg, int):
+        raise ValueError(f"nperseg must be an integer, got {type(nperseg).__name__}")
+    
+    if nperseg < 2:
+        raise ValueError(f"nperseg must be at least 2, got {nperseg}")
+    
+    # Convert to numpy array
+    signal_array = np.array(signal_data, dtype=float)
+    
+    # Calculate PSD
+    if method == "welch":
+        # Welch's method: overlapping segments with averaging (more accurate for noisy signals)
+        freqs, psd = scipy_signal.welch(signal_array, fs=sample_rate, nperseg=min(nperseg, len(signal_array)))
+    else:  # periodogram
+        # Periodogram: direct FFT method
+        freqs, psd = scipy_signal.periodogram(signal_array, fs=sample_rate)
+    
+    # Calculate statistics
+    total_power = float(np.trapz(psd, freqs))  # Integrate PSD to get total power
+    peak_idx = np.argmax(psd)
+    peak_frequency = float(freqs[peak_idx])
+    peak_power = float(psd[peak_idx])
+    
+    # Generate interpretation
+    interpretation = f"Peak power at {peak_frequency:.1f} Hz. "
+    if peak_frequency < 100:
+        interpretation += "Low frequency energy dominant - typical of structural vibration or slow processes."
+    elif peak_frequency < 1000:
+        interpretation += "Medium frequency energy - typical of rotating machinery."
+    else:
+        interpretation += "High frequency energy - may indicate bearing wear or gear mesh issues."
+    
+    return {
+        'method': method.title(),
+        'frequencies': freqs.tolist(),
+        'psd': psd.tolist(),
+        'total_power': total_power,
+        'peak_frequency': peak_frequency,
+        'peak_power': peak_power,
+        'interpretation': interpretation
+    }
+
+
+def rms_value(signal_data: list[float], window_size: int = None, reference_value: float = None) -> dict[str, Any]:
+    """
+    Calculate Root Mean Square (RMS) for overall signal energy.
+    
+    Used for overall vibration severity (ISO 10816), electrical current RMS, and acoustic noise level.
+    
+    Args:
+        signal_data: Time-domain signal, min 2 items
+        window_size: Calculate rolling RMS (optional), min 2
+        reference_value: Reference for dB calculation (e.g., 20 µPa for acoustic)
+        
+    Returns:
+        Dictionary containing:
+        - 'rms': Overall RMS value
+        - 'peak': Peak value
+        - 'crest_factor': Peak/RMS ratio
+        - 'rms_db': RMS in decibels (if reference provided)
+        - 'rolling_rms': Rolling RMS values (if window_size provided)
+        - 'interpretation': Analysis interpretation
+        
+    Raises:
+        ValueError: If validation fails
+    """
+    # Validate input
+    if not isinstance(signal_data, list):
+        raise ValueError(f"signal_data must be a list, got {type(signal_data).__name__}")
+    
+    if len(signal_data) < 2:
+        raise ValueError("signal_data must contain at least 2 items")
+    
+    # Validate all elements are numeric
+    for i, value in enumerate(signal_data):
+        if not isinstance(value, (int, float)):
+            raise ValueError(f"All signal values must be numeric. Item at index {i} is {type(value).__name__}: {value}")
+    
+    # Validate window_size if provided
+    if window_size is not None:
+        if not isinstance(window_size, int):
+            raise ValueError(f"window_size must be an integer, got {type(window_size).__name__}")
+        if window_size < 2:
+            raise ValueError(f"window_size must be at least 2, got {window_size}")
+        if window_size > len(signal_data):
+            raise ValueError(f"window_size ({window_size}) cannot be larger than signal length ({len(signal_data)})")
+    
+    # Validate reference_value if provided
+    if reference_value is not None:
+        if not isinstance(reference_value, (int, float)):
+            raise ValueError(f"reference_value must be numeric, got {type(reference_value).__name__}")
+        if reference_value <= 0:
+            raise ValueError(f"reference_value must be positive, got {reference_value}")
+    
+    # Convert to numpy array
+    signal_array = np.array(signal_data, dtype=float)
+    
+    # Calculate overall RMS
+    rms = float(np.sqrt(np.mean(signal_array ** 2)))
+    
+    # Calculate peak value
+    peak = float(np.max(np.abs(signal_array)))
+    
+    # Calculate crest factor (peak/RMS)
+    crest_factor = float(peak / rms) if rms > 0 else 0.0
+    
+    # Calculate RMS in dB if reference provided
+    rms_db = None
+    if reference_value is not None and rms > 0:
+        rms_db = float(20 * np.log10(rms / reference_value))
+    
+    # Calculate rolling RMS if window_size provided
+    rolling_rms_values = None
+    if window_size is not None:
+        rolling_rms_list = []
+        for i in range(len(signal_array) - window_size + 1):
+            window = signal_array[i:i + window_size]
+            window_rms = np.sqrt(np.mean(window ** 2))
+            rolling_rms_list.append(float(window_rms))
+        rolling_rms_values = rolling_rms_list
+    
+    # Generate interpretation
+    interpretation = ""
+    if crest_factor > 5:
+        interpretation = "High crest factor indicates impulsive signals - check for impacts or bearing defects."
+    elif crest_factor > 3:
+        interpretation = "Moderate crest factor - normal for many rotating machinery signals."
+    else:
+        interpretation = "Low crest factor - signal is relatively smooth."
+    
+    # Add trending information if rolling RMS calculated
+    trend = None
+    if rolling_rms_values and len(rolling_rms_values) > 1:
+        # Simple trend detection: compare first and last thirds
+        first_third = np.mean(rolling_rms_values[:len(rolling_rms_values) // 3])
+        last_third = np.mean(rolling_rms_values[-len(rolling_rms_values) // 3:])
+        percent_change = ((last_third - first_third) / first_third * 100) if first_third > 0 else 0
+        
+        if percent_change > 10:
+            trend = "increasing"
+        elif percent_change < -10:
+            trend = "decreasing"
+        else:
+            trend = "stable"
+    
+    result = {
+        'rms': rms,
+        'peak': peak,
+        'crest_factor': crest_factor,
+        'interpretation': interpretation
+    }
+    
+    if rms_db is not None:
+        result['rms_db'] = rms_db
+    
+    if rolling_rms_values is not None:
+        result['rolling_rms'] = rolling_rms_values
+        result['trend'] = trend
+    
+    return result
+
+
+def peak_detection(signal_data: list[float], frequencies: list[float] = None, height: float = 0.1, 
+                   distance: int = 1, prominence: float = 0.05, top_n: int = 10) -> dict[str, Any]:
+    """
+    Identify significant peaks in signals with filtering and ranking.
+    
+    Used for finding dominant vibration frequencies, detecting harmonics, and identifying resonances.
+    
+    Args:
+        signal_data: Signal data (time or frequency domain), min 3 items
+        frequencies: Corresponding frequencies (for frequency domain data), optional
+        height: Minimum peak height (default: 0.1)
+        distance: Minimum samples between peaks (default: 1)
+        prominence: Required prominence above surroundings (default: 0.05)
+        top_n: Return top N peaks only (1-50, default: 10)
+        
+    Returns:
+        Dictionary containing:
+        - 'peaks_found': Total number of peaks detected
+        - 'top_peaks': List of top N peaks with indices, values, and interpretations
+        - 'interpretation': Overall analysis
+        
+    Raises:
+        ValueError: If validation fails
+    """
+    # Validate input
+    if not isinstance(signal_data, list):
+        raise ValueError(f"signal_data must be a list, got {type(signal_data).__name__}")
+    
+    if len(signal_data) < 3:
+        raise ValueError("signal_data must contain at least 3 items")
+    
+    # Validate all elements are numeric
+    for i, value in enumerate(signal_data):
+        if not isinstance(value, (int, float)):
+            raise ValueError(f"All signal values must be numeric. Item at index {i} is {type(value).__name__}: {value}")
+    
+    # Validate frequencies if provided
+    if frequencies is not None:
+        if not isinstance(frequencies, list):
+            raise ValueError(f"frequencies must be a list, got {type(frequencies).__name__}")
+        if len(frequencies) != len(signal_data):
+            raise ValueError(f"frequencies length ({len(frequencies)}) must match signal_data length ({len(signal_data)})")
+        for i, value in enumerate(frequencies):
+            if not isinstance(value, (int, float)):
+                raise ValueError(f"All frequency values must be numeric. Item at index {i} is {type(value).__name__}")
+    
+    # Validate parameters
+    if not isinstance(height, (int, float)):
+        raise ValueError(f"height must be numeric, got {type(height).__name__}")
+    
+    if not isinstance(distance, int):
+        raise ValueError(f"distance must be an integer, got {type(distance).__name__}")
+    if distance < 1:
+        raise ValueError(f"distance must be at least 1, got {distance}")
+    
+    if not isinstance(prominence, (int, float)):
+        raise ValueError(f"prominence must be numeric, got {type(prominence).__name__}")
+    
+    if not isinstance(top_n, int):
+        raise ValueError(f"top_n must be an integer, got {type(top_n).__name__}")
+    if top_n < 1 or top_n > 50:
+        raise ValueError(f"top_n must be between 1 and 50, got {top_n}")
+    
+    # Convert to numpy array
+    signal_array = np.array(signal_data, dtype=float)
+    
+    # Detect peaks using scipy
+    # Calculate relative prominence threshold
+    max_val = np.max(signal_array)
+    abs_prominence = prominence * max_val if max_val > 0 else prominence
+    
+    peaks, properties = scipy_signal.find_peaks(
+        signal_array,
+        height=height,
+        distance=distance,
+        prominence=abs_prominence
+    )
+    
+    peaks_found = len(peaks)
+    
+    # Sort peaks by magnitude (descending) and take top N
+    if peaks_found > 0:
+        peak_magnitudes = signal_array[peaks]
+        sorted_indices = np.argsort(peak_magnitudes)[::-1]
+        top_indices = sorted_indices[:min(top_n, peaks_found)]
+        
+        top_peaks_list = []
+        for rank, idx in enumerate(top_indices, 1):
+            peak_idx = peaks[idx]
+            magnitude = float(signal_array[peak_idx])
+            
+            peak_info = {
+                'index': int(peak_idx),
+                'magnitude': magnitude,
+                'prominence': float(properties['prominences'][idx]),
+                'rank': rank
+            }
+            
+            # Add frequency if provided
+            if frequencies is not None:
+                frequency = float(frequencies[peak_idx])
+                peak_info['frequency'] = frequency
+                
+                # Add interpretation for frequency domain
+                interpretation = ""
+                if 59 <= frequency <= 61:
+                    interpretation = "Electrical line frequency (60 Hz)"
+                elif 119 <= frequency <= 121:
+                    interpretation = "Second harmonic (120 Hz)"
+                elif 49 <= frequency <= 51:
+                    interpretation = "Electrical line frequency (50 Hz)"
+                elif frequency > 1000:
+                    interpretation = "High frequency - potential bearing defect"
+                
+                peak_info['interpretation'] = interpretation
+            
+            top_peaks_list.append(peak_info)
+    else:
+        top_peaks_list = []
+    
+    # Generate interpretation
+    if peaks_found == 0:
+        interpretation = "No significant peaks detected in the signal."
+    elif peaks_found == 1:
+        interpretation = "Single dominant peak detected."
+    else:
+        interpretation = f"{peaks_found} peaks detected. Top {min(top_n, peaks_found)} peaks returned."
+    
+    return {
+        'peaks_found': peaks_found,
+        'top_peaks': top_peaks_list,
+        'interpretation': interpretation
+    }
+
+
+def signal_to_noise_ratio(signal_data: list[float], noise_data: list[float] = None, method: str = "power") -> dict[str, Any]:
+    """
+    Calculate Signal-to-Noise Ratio (SNR) to assess signal quality.
+    
+    Used for sensor health monitoring, data acquisition quality checks, and instrumentation validation.
+    
+    Args:
+        signal_data: Signal containing signal + noise, min 10 items
+        noise_data: Noise reference (optional - will estimate if not provided)
+        method: SNR calculation method - "power", "amplitude", or "peak" (default: "power")
+        
+    Returns:
+        Dictionary containing:
+        - 'snr_db': SNR in decibels
+        - 'snr_ratio': Linear SNR ratio
+        - 'signal_power': Signal power
+        - 'noise_power': Noise power
+        - 'quality': Quality assessment
+        - 'interpretation': Analysis interpretation
+        
+    Raises:
+        ValueError: If validation fails
+    """
+    # Validate input
+    if not isinstance(signal_data, list):
+        raise ValueError(f"signal_data must be a list, got {type(signal_data).__name__}")
+    
+    if len(signal_data) < 10:
+        raise ValueError("signal_data must contain at least 10 items")
+    
+    # Validate all elements are numeric
+    for i, value in enumerate(signal_data):
+        if not isinstance(value, (int, float)):
+            raise ValueError(f"All signal values must be numeric. Item at index {i} is {type(value).__name__}: {value}")
+    
+    # Validate noise_data if provided
+    if noise_data is not None:
+        if not isinstance(noise_data, list):
+            raise ValueError(f"noise_data must be a list, got {type(noise_data).__name__}")
+        for i, value in enumerate(noise_data):
+            if not isinstance(value, (int, float)):
+                raise ValueError(f"All noise values must be numeric. Item at index {i} is {type(value).__name__}")
+    
+    # Validate method
+    valid_methods = ["power", "amplitude", "peak"]
+    if method not in valid_methods:
+        raise ValueError(f"method must be one of {valid_methods}, got '{method}'")
+    
+    # Convert to numpy array
+    signal_array = np.array(signal_data, dtype=float)
+    
+    # Estimate signal and noise
+    if noise_data is not None:
+        # Noise reference provided
+        noise_array = np.array(noise_data, dtype=float)
+        noise_estimate = noise_array
+        # Assume signal_data contains pure signal
+        signal_estimate = signal_array
+    else:
+        # Estimate noise from signal (assuming signal has both)
+        # Use high-pass filtered signal as noise estimate
+        # This is a simple estimation method
+        mean_val = np.mean(signal_array)
+        signal_estimate = signal_array - mean_val
+        
+        # Estimate noise as high-frequency component
+        # Use difference between adjacent samples as noise estimate
+        noise_estimate = np.diff(signal_array)
+    
+    # Calculate SNR based on method
+    if method == "power":
+        # Power-based SNR
+        signal_power = float(np.mean(signal_estimate ** 2))
+        noise_power = float(np.mean(noise_estimate ** 2))
+        
+        if noise_power > 0:
+            snr_ratio = signal_power / noise_power
+            snr_db = float(10 * np.log10(snr_ratio))
+        else:
+            snr_ratio = float('inf')
+            snr_db = float('inf')
+    
+    elif method == "amplitude":
+        # Amplitude-based SNR (RMS)
+        signal_rms = float(np.sqrt(np.mean(signal_estimate ** 2)))
+        noise_rms = float(np.sqrt(np.mean(noise_estimate ** 2)))
+        
+        if noise_rms > 0:
+            snr_ratio = signal_rms / noise_rms
+            snr_db = float(20 * np.log10(snr_ratio))
+        else:
+            snr_ratio = float('inf')
+            snr_db = float('inf')
+        
+        signal_power = float(signal_rms ** 2)
+        noise_power = float(noise_rms ** 2)
+    
+    else:  # peak
+        # Peak-based SNR
+        signal_peak = float(np.max(np.abs(signal_estimate)))
+        noise_peak = float(np.max(np.abs(noise_estimate)))
+        
+        if noise_peak > 0:
+            snr_ratio = signal_peak / noise_peak
+            snr_db = float(20 * np.log10(snr_ratio))
+        else:
+            snr_ratio = float('inf')
+            snr_db = float('inf')
+        
+        signal_power = float(signal_peak ** 2)
+        noise_power = float(noise_peak ** 2)
+    
+    # Quality assessment
+    if snr_db > 40:
+        quality = "Excellent"
+        interpretation = "Signal quality excellent (SNR > 40 dB). No sensor issues detected."
+    elif snr_db > 30:
+        quality = "Good"
+        interpretation = "Signal quality good (SNR > 30 dB). Suitable for most applications."
+    elif snr_db > 20:
+        quality = "Fair"
+        interpretation = "Signal quality fair (SNR > 20 dB). Consider noise reduction if critical."
+    elif snr_db > 10:
+        quality = "Poor"
+        interpretation = "Signal quality poor (SNR > 10 dB). Check sensor and wiring."
+    else:
+        quality = "Very Poor"
+        interpretation = "Signal quality very poor (SNR < 10 dB). Sensor may be faulty."
+    
+    return {
+        'snr_db': snr_db,
+        'snr_ratio': snr_ratio,
+        'signal_power': signal_power,
+        'noise_power': noise_power,
+        'quality': quality,
+        'interpretation': interpretation
+    }
+
+
+def harmonic_analysis(signal_data: list[float], sample_rate: float, fundamental_freq: float, max_harmonic: int = 50) -> dict[str, Any]:
+    """
+    Detect and analyze harmonic content in electrical and mechanical signals.
+    
+    Used for power quality assessment (THD), motor current signature analysis, and electrical fault detection.
+    
+    Args:
+        signal_data: Periodic signal (voltage, current, vibration), min 64 items
+        sample_rate: Sampling frequency in Hz
+        fundamental_freq: Expected fundamental frequency (e.g., 60 Hz for electrical), min 1 Hz
+        max_harmonic: Maximum harmonic order to analyze (1-100, default: 50)
+        
+    Returns:
+        Dictionary containing:
+        - 'fundamental': Fundamental frequency component (frequency, magnitude, phase)
+        - 'harmonics': List of harmonic components (order, frequency, magnitude, percent)
+        - 'thd': Total Harmonic Distortion percentage
+        - 'thd_interpretation': THD quality assessment
+        - 'dominant_harmonics': List of strongest harmonic orders
+        - 'interpretation': Analysis interpretation
+        
+    Raises:
+        ValueError: If validation fails
+    """
+    # Validate input
+    if not isinstance(signal_data, list):
+        raise ValueError(f"signal_data must be a list, got {type(signal_data).__name__}")
+    
+    if len(signal_data) < 64:
+        raise ValueError("signal_data must contain at least 64 items")
+    
+    # Validate all elements are numeric
+    for i, value in enumerate(signal_data):
+        if not isinstance(value, (int, float)):
+            raise ValueError(f"All signal values must be numeric. Item at index {i} is {type(value).__name__}: {value}")
+    
+    # Validate sample_rate
+    if not isinstance(sample_rate, (int, float)):
+        raise ValueError(f"sample_rate must be numeric, got {type(sample_rate).__name__}")
+    if sample_rate <= 0:
+        raise ValueError(f"sample_rate must be positive, got {sample_rate}")
+    
+    # Validate fundamental_freq
+    if not isinstance(fundamental_freq, (int, float)):
+        raise ValueError(f"fundamental_freq must be numeric, got {type(fundamental_freq).__name__}")
+    if fundamental_freq < 1:
+        raise ValueError(f"fundamental_freq must be at least 1 Hz, got {fundamental_freq}")
+    
+    # Validate max_harmonic
+    if not isinstance(max_harmonic, int):
+        raise ValueError(f"max_harmonic must be an integer, got {type(max_harmonic).__name__}")
+    if max_harmonic < 1 or max_harmonic > 100:
+        raise ValueError(f"max_harmonic must be between 1 and 100, got {max_harmonic}")
+    
+    # Convert to numpy array
+    signal_array = np.array(signal_data, dtype=float)
+    n = len(signal_array)
+    
+    # Perform FFT
+    fft_result = fft(signal_array)
+    freqs = fftfreq(n, 1.0 / sample_rate)
+    
+    # Calculate magnitude spectrum
+    magnitudes = np.abs(fft_result) * 2.0 / n
+    
+    # Find fundamental frequency component
+    freq_resolution = sample_rate / n
+    fund_idx = int(round(fundamental_freq / freq_resolution))
+    
+    # Search in a window around expected fundamental
+    search_window = max(3, int(0.05 * fund_idx))  # 5% window
+    search_start = max(0, fund_idx - search_window)
+    search_end = min(len(freqs) // 2, fund_idx + search_window)
+    
+    # Find peak in search window
+    window_mags = magnitudes[search_start:search_end]
+    if len(window_mags) > 0:
+        local_peak = np.argmax(window_mags)
+        fund_idx = search_start + local_peak
+    
+    fundamental_magnitude = float(magnitudes[fund_idx])
+    fundamental_frequency = float(freqs[fund_idx])
+    
+    # Extract harmonics
+    harmonics_list = []
+    harmonic_sum_squared = 0.0
+    
+    for h in range(2, max_harmonic + 1):
+        harmonic_freq = fundamental_frequency * h
+        
+        # Check if harmonic is within Nyquist frequency
+        if harmonic_freq >= sample_rate / 2:
+            break
+        
+        # Find harmonic component
+        harm_idx = int(round(harmonic_freq / freq_resolution))
+        
+        # Search in window
+        search_window_h = max(2, int(0.05 * harm_idx))
+        search_start_h = max(0, harm_idx - search_window_h)
+        search_end_h = min(len(freqs) // 2, harm_idx + search_window_h)
+        
+        if search_start_h < search_end_h:
+            window_mags_h = magnitudes[search_start_h:search_end_h]
+            if len(window_mags_h) > 0:
+                local_peak_h = np.argmax(window_mags_h)
+                harm_idx = search_start_h + local_peak_h
+                
+                harmonic_magnitude = float(magnitudes[harm_idx])
+                harmonic_frequency = float(freqs[harm_idx])
+                
+                # Calculate percentage of fundamental
+                if fundamental_magnitude > 0:
+                    percent = (harmonic_magnitude / fundamental_magnitude) * 100
+                else:
+                    percent = 0.0
+                
+                harmonics_list.append({
+                    'order': h,
+                    'frequency': harmonic_frequency,
+                    'magnitude': harmonic_magnitude,
+                    'percent': float(percent)
+                })
+                
+                harmonic_sum_squared += harmonic_magnitude ** 2
+    
+    # Calculate THD (Total Harmonic Distortion)
+    if fundamental_magnitude > 0:
+        thd = float((np.sqrt(harmonic_sum_squared) / fundamental_magnitude) * 100)
+    else:
+        thd = 0.0
+    
+    # THD interpretation
+    if thd < 5:
+        thd_interpretation = "Excellent - Very low distortion (THD < 5%)"
+    elif thd < 8:
+        thd_interpretation = "Good - Low distortion (5% ≤ THD < 8%)"
+    elif thd < 15:
+        thd_interpretation = "Moderate - Acceptable distortion (8% ≤ THD < 15%)"
+    elif thd < 25:
+        thd_interpretation = "Poor - High distortion (15% ≤ THD < 25%)"
+    else:
+        thd_interpretation = "Very Poor - Excessive distortion (THD ≥ 25%)"
+    
+    # Find dominant harmonics (top 5 by magnitude)
+    if harmonics_list:
+        sorted_harmonics = sorted(harmonics_list, key=lambda x: x['magnitude'], reverse=True)
+        dominant_harmonics = [h['order'] for h in sorted_harmonics[:5]]
+    else:
+        dominant_harmonics = []
+    
+    # Generate interpretation
+    interpretation = f"THD = {thd:.1f}%. "
+    if thd < 5:
+        interpretation += "Signal quality is excellent with minimal harmonic distortion."
+    elif thd < 15:
+        interpretation += "Acceptable harmonic content for most applications."
+    else:
+        interpretation += "High harmonic distortion detected. Consider harmonic filtering."
+    
+    if dominant_harmonics:
+        # Check for odd vs even harmonics
+        odd_harmonics = [h for h in dominant_harmonics if h % 2 == 1]
+        even_harmonics = [h for h in dominant_harmonics if h % 2 == 0]
+        
+        if len(odd_harmonics) > len(even_harmonics):
+            interpretation += " Odd harmonics dominant - typical of non-linear loads or VFD operation."
+        elif len(even_harmonics) > len(odd_harmonics):
+            interpretation += " Even harmonics present - may indicate asymmetry or half-wave distortion."
+    
+    return {
+        'fundamental': {
+            'frequency': fundamental_frequency,
+            'magnitude': fundamental_magnitude,
+            'phase': 0.0  # Phase not calculated in this simplified version
+        },
+        'harmonics': harmonics_list,
+        'thd': thd,
+        'thd_interpretation': thd_interpretation,
+        'dominant_harmonics': dominant_harmonics,
+        'interpretation': interpretation
+    }
+
+
+# ============================================================================
+# Statistical Process Control (SPC) Functions
+# ============================================================================
+
+
+# Control chart constants for X-bar and R charts
+# Source: ASTM Manual on Presentation of Data and Control Chart Analysis (Table A2)
+CONTROL_CHART_CONSTANTS = {
+    # n: (A2, D3, D4, d2, c4)
+    # A2: Factor for X-bar chart control limits
+    # D3, D4: Factors for R chart control limits
+    # d2: Relationship between R-bar and sigma
+    # c4: Relationship between S-bar and sigma
+    2: (1.880, 0.000, 3.267, 1.128, 0.7979),
+    3: (1.023, 0.000, 2.574, 1.693, 0.8862),
+    4: (0.729, 0.000, 2.282, 2.059, 0.9213),
+    5: (0.577, 0.000, 2.114, 2.326, 0.9400),
+    6: (0.483, 0.000, 2.004, 2.534, 0.9515),
+    7: (0.419, 0.076, 1.924, 2.704, 0.9594),
+    8: (0.373, 0.136, 1.864, 2.847, 0.9650),
+    9: (0.337, 0.184, 1.816, 2.970, 0.9693),
+    10: (0.308, 0.223, 1.777, 3.078, 0.9727),
+    11: (0.285, 0.256, 1.744, 3.173, 0.9754),
+    12: (0.266, 0.283, 1.717, 3.258, 0.9776),
+    13: (0.249, 0.307, 1.693, 3.336, 0.9794),
+    14: (0.235, 0.328, 1.672, 3.407, 0.9810),
+    15: (0.223, 0.347, 1.653, 3.472, 0.9823),
+    16: (0.212, 0.363, 1.637, 3.532, 0.9835),
+    17: (0.203, 0.378, 1.622, 3.588, 0.9845),
+    18: (0.194, 0.391, 1.609, 3.640, 0.9854),
+    19: (0.187, 0.404, 1.596, 3.689, 0.9862),
+    20: (0.180, 0.415, 1.585, 3.735, 0.9869),
+    21: (0.173, 0.425, 1.575, 3.778, 0.9876),
+    22: (0.167, 0.435, 1.565, 3.819, 0.9882),
+    23: (0.162, 0.443, 1.557, 3.858, 0.9887),
+    24: (0.157, 0.452, 1.548, 3.895, 0.9892),
+    25: (0.153, 0.459, 1.541, 3.931, 0.9896),
+}
+
+
+def control_limits(
+    data: list[float],
+    chart_type: str,
+    subgroup_size: int = 5,
+    sigma_level: float = 3.0
+) -> dict[str, Any]:
+    """
+    Calculate control chart limits (UCL, LCL, centerline) for various chart types.
+    
+    Use Cases:
+    - Monitor critical quality parameters (viscosity, pH, concentration)
+    - Track process variables (temperature, pressure, flow rate)
+    - Control product dimensions and weights
+    - Monitor cycle times and production rates
+    - Detect process shifts before they cause defects
+    
+    Args:
+        data: Process measurements or subgroup averages (min 5 items)
+        chart_type: Type of control chart - "x_bar", "individuals", "range", "std_dev",
+                   "p", "np", "c", "u"
+        subgroup_size: Size of subgroups for X-bar and R charts (2-25, default: 5)
+        sigma_level: Number of standard deviations for limits (1-6, default: 3)
+        
+    Returns:
+        Dictionary containing:
+        - chart_type: Type of chart
+        - centerline: Process centerline (mean)
+        - ucl: Upper control limit
+        - lcl: Lower control limit
+        - sigma: Process standard deviation
+        - subgroup_size: Subgroup size used
+        - data_points: Number of data points
+        - out_of_control_points: Indices of points beyond limits
+        - out_of_control_details: Details of violations
+        - process_status: Overall status message
+        - recommendations: Actionable recommendations
+        
+    Raises:
+        ValueError: If parameters are invalid
+        
+    Examples:
+        control_limits([100.5, 100.2, 100.8, 100.1], "individuals")
+        >>> {
+        ...   'chart_type': 'individuals',
+        ...   'centerline': 100.4,
+        ...   'ucl': 102.1,
+        ...   'lcl': 98.7,
+        ...   'process_status': 'In Control'
+        ... }
+    """
+    # Validate input
+    if not isinstance(data, list):
+        raise ValueError(f"data must be a list, got {type(data).__name__}")
+    
+    if len(data) < 5:
+        raise ValueError("data must contain at least 5 items")
+    
+    for i, value in enumerate(data):
+        if not isinstance(value, (int, float)):
+            raise ValueError(f"All data values must be numeric. Item at index {i} is {type(value).__name__}")
+    
+    # Validate chart_type
+    valid_types = ["x_bar", "individuals", "range", "std_dev", "p", "np", "c", "u"]
+    if chart_type not in valid_types:
+        raise ValueError(f"chart_type must be one of {valid_types}, got '{chart_type}'")
+    
+    # Validate subgroup_size
+    if not isinstance(subgroup_size, int):
+        raise ValueError(f"subgroup_size must be an integer, got {type(subgroup_size).__name__}")
+    
+    if subgroup_size < 2 or subgroup_size > 25:
+        raise ValueError(f"subgroup_size must be between 2 and 25, got {subgroup_size}")
+    
+    # Validate sigma_level
+    if not isinstance(sigma_level, (int, float)):
+        raise ValueError(f"sigma_level must be numeric, got {type(sigma_level).__name__}")
+    
+    if sigma_level < 1 or sigma_level > 6:
+        raise ValueError(f"sigma_level must be between 1 and 6, got {sigma_level}")
+    
+    # Calculate control limits based on chart type
+    if chart_type == "x_bar":
+        return _calculate_xbar_limits(data, subgroup_size, sigma_level)
+    elif chart_type == "individuals":
+        return _calculate_individuals_limits(data, sigma_level)
+    elif chart_type == "range":
+        return _calculate_range_limits(data, subgroup_size, sigma_level)
+    elif chart_type == "std_dev":
+        return _calculate_stddev_limits(data, subgroup_size, sigma_level)
+    elif chart_type in ["p", "np", "c", "u"]:
+        return _calculate_attribute_limits(data, chart_type, subgroup_size, sigma_level)
+    else:
+        raise ValueError(f"Chart type '{chart_type}' not implemented")
+
+
+def _calculate_xbar_limits(data: list[float], subgroup_size: int, sigma_level: float) -> dict[str, Any]:
+    """Calculate control limits for X-bar chart."""
+    # For X-bar chart, data should be subgroup averages
+    n = len(data)
+    centerline = sum(data) / n
+    
+    # Estimate sigma using moving range method (simplified)
+    moving_ranges = [abs(data[i+1] - data[i]) for i in range(n - 1)]
+    avg_moving_range = sum(moving_ranges) / len(moving_ranges)
+    
+    # d2 constant for subgroups of size 2 (moving range)
+    d2_mr = 1.128
+    sigma = avg_moving_range / d2_mr
+    
+    # Get A2 constant for the subgroup size
+    if subgroup_size in CONTROL_CHART_CONSTANTS:
+        A2, _, _, _, _ = CONTROL_CHART_CONSTANTS[subgroup_size]
+    else:
+        # Approximate for sizes > 25 using Central Limit Theorem
+        # As n increases, the standard error approaches sigma/sqrt(n)
+        # and 3-sigma limits approach 3*sigma/sqrt(n)
+        A2 = 3 / (subgroup_size ** 0.5)
+    
+    # Calculate control limits: X-bar ± A2 * R-bar
+    # Simplified: use sigma estimate
+    ucl = centerline + sigma_level * sigma / (subgroup_size ** 0.5)
+    lcl = centerline - sigma_level * sigma / (subgroup_size ** 0.5)
+    
+    # Identify out of control points
+    out_of_control_points = []
+    out_of_control_details = []
+    
+    for i, value in enumerate(data):
+        if value > ucl:
+            out_of_control_points.append(i)
+            out_of_control_details.append({
+                'index': i,
+                'value': value,
+                'violation': 'above_ucl'
+            })
+        elif value < lcl:
+            out_of_control_points.append(i)
+            out_of_control_details.append({
+                'index': i,
+                'value': value,
+                'violation': 'below_lcl'
+            })
+    
+    # Determine process status
+    if len(out_of_control_points) == 0:
+        process_status = "In Control - All points within limits"
+        recommendations = "Process is stable. Continue monitoring."
+    else:
+        process_status = f"Out of Control - {len(out_of_control_points)} points beyond limits"
+        recommendations = f"Investigate special cause variation at points {', '.join(map(str, out_of_control_points))}"
+    
+    return {
+        'chart_type': 'x_bar',
+        'centerline': centerline,
+        'ucl': ucl,
+        'lcl': lcl,
+        'sigma': sigma,
+        'subgroup_size': subgroup_size,
+        'data_points': n,
+        'out_of_control_points': out_of_control_points,
+        'out_of_control_details': out_of_control_details,
+        'process_status': process_status,
+        'recommendations': recommendations
+    }
+
+
+def _calculate_individuals_limits(data: list[float], sigma_level: float) -> dict[str, Any]:
+    """Calculate control limits for Individuals (I) chart."""
+    n = len(data)
+    centerline = sum(data) / n
+    
+    # Calculate moving ranges
+    moving_ranges = [abs(data[i+1] - data[i]) for i in range(n - 1)]
+    avg_moving_range = sum(moving_ranges) / len(moving_ranges)
+    
+    # Estimate sigma using d2 constant for moving range (n=2)
+    d2 = 1.128
+    sigma = avg_moving_range / d2
+    
+    # Calculate control limits
+    ucl = centerline + sigma_level * sigma
+    lcl = centerline - sigma_level * sigma
+    
+    # Identify out of control points
+    out_of_control_points = []
+    out_of_control_details = []
+    
+    for i, value in enumerate(data):
+        if value > ucl:
+            out_of_control_points.append(i)
+            out_of_control_details.append({
+                'index': i,
+                'value': value,
+                'violation': 'above_ucl'
+            })
+        elif value < lcl:
+            out_of_control_points.append(i)
+            out_of_control_details.append({
+                'index': i,
+                'value': value,
+                'violation': 'below_lcl'
+            })
+    
+    # Determine process status
+    if len(out_of_control_points) == 0:
+        process_status = "In Control - All points within limits"
+        recommendations = "Process is stable. Continue monitoring."
+    else:
+        process_status = f"Out of Control - {len(out_of_control_points)} points beyond limits"
+        recommendations = f"Investigate special cause variation at points {', '.join(map(str, out_of_control_points))}"
+    
+    return {
+        'chart_type': 'individuals',
+        'centerline': centerline,
+        'ucl': ucl,
+        'lcl': lcl,
+        'sigma': sigma,
+        'subgroup_size': 1,
+        'data_points': n,
+        'out_of_control_points': out_of_control_points,
+        'out_of_control_details': out_of_control_details,
+        'process_status': process_status,
+        'recommendations': recommendations
+    }
+
+
+def _calculate_range_limits(data: list[float], subgroup_size: int, sigma_level: float) -> dict[str, Any]:
+    """Calculate control limits for Range (R) chart."""
+    # For R chart, data should be subgroup ranges
+    n = len(data)
+    centerline = sum(data) / n  # R-bar
+    
+    # Get D3 and D4 constants
+    if subgroup_size in CONTROL_CHART_CONSTANTS:
+        _, D3, D4, _, _ = CONTROL_CHART_CONSTANTS[subgroup_size]
+    else:
+        # Approximate for sizes > 25
+        D3 = max(0, 1 - 3 / (subgroup_size ** 0.5))
+        D4 = 1 + 3 / (subgroup_size ** 0.5)
+    
+    # Calculate control limits
+    ucl = D4 * centerline
+    lcl = D3 * centerline
+    
+    # Estimate sigma from R-bar
+    if subgroup_size in CONTROL_CHART_CONSTANTS:
+        _, _, _, d2, _ = CONTROL_CHART_CONSTANTS[subgroup_size]
+    else:
+        d2 = subgroup_size ** 0.5  # Approximation
+    
+    sigma = centerline / d2
+    
+    # Identify out of control points
+    out_of_control_points = []
+    out_of_control_details = []
+    
+    for i, value in enumerate(data):
+        if value > ucl:
+            out_of_control_points.append(i)
+            out_of_control_details.append({
+                'index': i,
+                'value': value,
+                'violation': 'above_ucl'
+            })
+        elif value < lcl:
+            out_of_control_points.append(i)
+            out_of_control_details.append({
+                'index': i,
+                'value': value,
+                'violation': 'below_lcl'
+            })
+    
+    # Determine process status
+    if len(out_of_control_points) == 0:
+        process_status = "In Control - Process variability is stable"
+        recommendations = "Process variation is consistent. Continue monitoring."
+    else:
+        process_status = f"Out of Control - {len(out_of_control_points)} points indicate unstable variation"
+        recommendations = f"Investigate variability changes at points {', '.join(map(str, out_of_control_points))}"
+    
+    return {
+        'chart_type': 'range',
+        'centerline': centerline,
+        'ucl': ucl,
+        'lcl': lcl,
+        'sigma': sigma,
+        'subgroup_size': subgroup_size,
+        'data_points': n,
+        'out_of_control_points': out_of_control_points,
+        'out_of_control_details': out_of_control_details,
+        'process_status': process_status,
+        'recommendations': recommendations
+    }
+
+
+def _calculate_stddev_limits(data: list[float], subgroup_size: int, sigma_level: float) -> dict[str, Any]:
+    """Calculate control limits for Standard Deviation (S) chart."""
+    # For S chart, data should be subgroup standard deviations
+    n = len(data)
+    centerline = sum(data) / n  # S-bar
+    
+    # Get c4 constant
+    if subgroup_size in CONTROL_CHART_CONSTANTS:
+        _, _, _, _, c4 = CONTROL_CHART_CONSTANTS[subgroup_size]
+    else:
+        # Approximate c4 for large n
+        c4 = 1 - 1 / (4 * subgroup_size)
+    
+    # Calculate B3 and B4 factors (similar to D3, D4 for S charts)
+    B4 = 1 + 3 * ((1 - c4 ** 2) ** 0.5) / c4
+    B3 = max(0, 1 - 3 * ((1 - c4 ** 2) ** 0.5) / c4)
+    
+    # Calculate control limits
+    ucl = B4 * centerline
+    lcl = B3 * centerline
+    
+    # Estimate sigma from S-bar
+    sigma = centerline / c4
+    
+    # Identify out of control points
+    out_of_control_points = []
+    out_of_control_details = []
+    
+    for i, value in enumerate(data):
+        if value > ucl:
+            out_of_control_points.append(i)
+            out_of_control_details.append({
+                'index': i,
+                'value': value,
+                'violation': 'above_ucl'
+            })
+        elif value < lcl:
+            out_of_control_points.append(i)
+            out_of_control_details.append({
+                'index': i,
+                'value': value,
+                'violation': 'below_lcl'
+            })
+    
+    # Determine process status
+    if len(out_of_control_points) == 0:
+        process_status = "In Control - Process variability is stable"
+        recommendations = "Process variation is consistent. Continue monitoring."
+    else:
+        process_status = f"Out of Control - {len(out_of_control_points)} points indicate unstable variation"
+        recommendations = f"Investigate variability changes at points {', '.join(map(str, out_of_control_points))}"
+    
+    return {
+        'chart_type': 'std_dev',
+        'centerline': centerline,
+        'ucl': ucl,
+        'lcl': lcl,
+        'sigma': sigma,
+        'subgroup_size': subgroup_size,
+        'data_points': n,
+        'out_of_control_points': out_of_control_points,
+        'out_of_control_details': out_of_control_details,
+        'process_status': process_status,
+        'recommendations': recommendations
+    }
+
+
+def _calculate_attribute_limits(data: list[float], chart_type: str, subgroup_size: int, sigma_level: float) -> dict[str, Any]:
+    """Calculate control limits for attribute charts (p, np, c, u)."""
+    n = len(data)
+    centerline = sum(data) / n
+    
+    if chart_type == "p":
+        # p chart: proportion defective
+        # UCL/LCL = p-bar ± 3 * sqrt(p-bar * (1 - p-bar) / n)
+        sigma = (centerline * (1 - centerline) / subgroup_size) ** 0.5
+        ucl = centerline + sigma_level * sigma
+        lcl = max(0, centerline - sigma_level * sigma)  # Can't be negative
+    
+    elif chart_type == "np":
+        # np chart: number defective
+        # UCL/LCL = np-bar ± 3 * sqrt(np-bar * (1 - np-bar/n))
+        p = centerline / subgroup_size
+        sigma = (centerline * (1 - p)) ** 0.5
+        ucl = centerline + sigma_level * sigma
+        lcl = max(0, centerline - sigma_level * sigma)
+    
+    elif chart_type == "c":
+        # c chart: count of defects
+        # UCL/LCL = c-bar ± 3 * sqrt(c-bar)
+        sigma = centerline ** 0.5
+        ucl = centerline + sigma_level * sigma
+        lcl = max(0, centerline - sigma_level * sigma)
+    
+    elif chart_type == "u":
+        # u chart: defects per unit
+        # UCL/LCL = u-bar ± 3 * sqrt(u-bar / n)
+        sigma = (centerline / subgroup_size) ** 0.5
+        ucl = centerline + sigma_level * sigma
+        lcl = max(0, centerline - sigma_level * sigma)
+    
+    else:
+        raise ValueError(f"Unknown attribute chart type: {chart_type}")
+    
+    # Identify out of control points
+    out_of_control_points = []
+    out_of_control_details = []
+    
+    for i, value in enumerate(data):
+        if value > ucl:
+            out_of_control_points.append(i)
+            out_of_control_details.append({
+                'index': i,
+                'value': value,
+                'violation': 'above_ucl'
+            })
+        elif value < lcl:
+            out_of_control_points.append(i)
+            out_of_control_details.append({
+                'index': i,
+                'value': value,
+                'violation': 'below_lcl'
+            })
+    
+    # Determine process status
+    if len(out_of_control_points) == 0:
+        process_status = "In Control - All points within limits"
+        recommendations = "Process is stable. Continue monitoring."
+    else:
+        process_status = f"Out of Control - {len(out_of_control_points)} points beyond limits"
+        recommendations = f"Investigate special cause variation at points {', '.join(map(str, out_of_control_points))}"
+    
+    return {
+        'chart_type': chart_type,
+        'centerline': centerline,
+        'ucl': ucl,
+        'lcl': lcl,
+        'sigma': sigma,
+        'subgroup_size': subgroup_size,
+        'data_points': n,
+        'out_of_control_points': out_of_control_points,
+        'out_of_control_details': out_of_control_details,
+        'process_status': process_status,
+        'recommendations': recommendations
+    }
+
+
+def process_capability(
+    data: list[float],
+    usl: float,
+    lsl: float,
+    target: float = None
+) -> dict[str, Any]:
+    """
+    Calculate process capability indices (Cp, Cpk, Pp, Ppk).
+    
+    Use Cases:
+    - Evaluate if process meets customer specifications
+    - Compare process performance before/after improvements
+    - Assess supplier quality capability
+    - Determine if process can achieve Six Sigma levels
+    - Support process qualification and validation
+    
+    Args:
+        data: Process measurements (min 30 items)
+        usl: Upper specification limit
+        lsl: Lower specification limit
+        target: Target value (optional, defaults to midpoint of USL and LSL)
+        
+    Returns:
+        Dictionary containing:
+        - sample_size: Number of measurements
+        - mean: Process mean
+        - std_dev: Process standard deviation
+        - usl, lsl, target: Specification limits
+        - cp: Process capability (potential)
+        - cpk: Process capability (actual, accounts for centering)
+        - pp: Process performance (overall variation)
+        - ppk: Process performance (actual, accounts for centering)
+        - cp_interpretation: Human-readable interpretation
+        - cpk_interpretation: Human-readable interpretation
+        - sigma_level: Estimated sigma level
+        - percent_within_spec: Estimated % within specification
+        - estimated_ppm_defects: Estimated defects per million
+        - process_performance: Overall assessment
+        - centering: Assessment of process centering
+        - recommendations: Actionable recommendations
+        
+    Raises:
+        ValueError: If parameters are invalid
+        
+    Examples:
+        process_capability([100.1, 100.2, 99.9, 100.3], usl=103, lsl=97)
+        >>> {
+        ...   'cp': 2.35,
+        ...   'cpk': 2.18,
+        ...   'cp_interpretation': 'Excellent',
+        ...   'process_performance': 'Six Sigma capable'
+        ... }
+    """
+    # Validate input
+    if not isinstance(data, list):
+        raise ValueError(f"data must be a list, got {type(data).__name__}")
+    
+    if len(data) < 30:
+        raise ValueError("data must contain at least 30 items for reliable capability analysis")
+    
+    for i, value in enumerate(data):
+        if not isinstance(value, (int, float)):
+            raise ValueError(f"All data values must be numeric. Item at index {i} is {type(value).__name__}")
+    
+    # Validate specification limits
+    if not isinstance(usl, (int, float)):
+        raise ValueError(f"usl must be numeric, got {type(usl).__name__}")
+    
+    if not isinstance(lsl, (int, float)):
+        raise ValueError(f"lsl must be numeric, got {type(lsl).__name__}")
+    
+    if usl <= lsl:
+        raise ValueError(f"usl ({usl}) must be greater than lsl ({lsl})")
+    
+    # Set default target if not provided
+    if target is None:
+        target = (usl + lsl) / 2
+    else:
+        if not isinstance(target, (int, float)):
+            raise ValueError(f"target must be numeric, got {type(target).__name__}")
+    
+    # Calculate basic statistics
+    n = len(data)
+    mean = sum(data) / n
+    variance = sum((x - mean) ** 2 for x in data) / (n - 1)  # Sample variance
+    std_dev = variance ** 0.5
+    
+    # Calculate Cp (potential capability)
+    # Cp = (USL - LSL) / (6 * sigma)
+    cp = (usl - lsl) / (6 * std_dev)
+    
+    # Calculate Cpk (actual capability, accounts for centering)
+    # Cpk = min[(USL - mean) / (3 * sigma), (mean - LSL) / (3 * sigma)]
+    cpu = (usl - mean) / (3 * std_dev)
+    cpl = (mean - lsl) / (3 * std_dev)
+    cpk = min(cpu, cpl)
+    
+    # Calculate Pp (overall performance, using total variation)
+    # Note: In practice, Pp uses long-term sigma (between-subgroup variation) while Cp uses
+    # within-subgroup variation. For individual measurements without subgroups, Pp ≈ Cp.
+    # This implementation uses sample standard deviation which is appropriate for this case.
+    pp = cp  # Simplified for individual measurements
+    
+    # Calculate Ppk (overall performance with centering)
+    # Note: Ppk uses long-term sigma like Pp. For individual measurements, Ppk ≈ Cpk.
+    ppk = cpk  # Simplified for individual measurements
+    
+    # Interpret Cp
+    if cp >= 2.0:
+        cp_interpretation = "Excellent - Process spread is much smaller than tolerance"
+    elif cp >= 1.33:
+        cp_interpretation = "Good - Process is capable with some margin"
+    elif cp >= 1.0:
+        cp_interpretation = "Adequate - Process barely capable, improvement recommended"
+    else:
+        cp_interpretation = "Poor - Process spread exceeds tolerance, improvement required"
+    
+    # Interpret Cpk
+    if cpk >= 2.0:
+        cpk_interpretation = "Excellent - Process is well-centered and capable"
+    elif cpk >= 1.33:
+        cpk_interpretation = "Good - Process is capable but may benefit from centering"
+    elif cpk >= 1.0:
+        cpk_interpretation = "Adequate - Process marginally capable, centering needed"
+    else:
+        cpk_interpretation = "Poor - Process not capable, centering and/or variation reduction required"
+    
+    # Calculate sigma level
+    # Sigma level ≈ 3 * Cpk
+    sigma_level = 3 * cpk
+    
+    # Estimate percent within specification using normal distribution
+    # P(LSL < X < USL) where X ~ N(mean, std_dev)
+    z_lower = (lsl - mean) / std_dev
+    z_upper = (usl - mean) / std_dev
+    percent_within_spec = (scipy_stats.norm.cdf(z_upper) - scipy_stats.norm.cdf(z_lower)) * 100
+    
+    # Estimate PPM defects
+    estimated_ppm_defects = (1 - percent_within_spec / 100) * 1_000_000
+    
+    # Overall process performance
+    if sigma_level >= 6:
+        process_performance = "Six Sigma capable"
+    elif sigma_level >= 5:
+        process_performance = "Five Sigma capable"
+    elif sigma_level >= 4:
+        process_performance = "Four Sigma capable"
+    elif sigma_level >= 3:
+        process_performance = "Three Sigma capable"
+    else:
+        process_performance = "Below Three Sigma - significant improvement needed"
+    
+    # Assess centering
+    centering_offset = abs(mean - target)
+    if centering_offset < 0.1 * (usl - lsl):
+        centering = f"Well-centered (offset: {centering_offset:.4f} units)"
+    elif centering_offset < 0.25 * (usl - lsl):
+        centering = f"Slightly off-center by {centering_offset:.4f} units"
+    else:
+        centering = f"Significantly off-center by {centering_offset:.4f} units"
+    
+    # Recommendations
+    if cpk >= 2.0:
+        recommendations = "Process is highly capable. Consider tightening specifications or cost reduction opportunities."
+    elif cpk >= 1.33:
+        recommendations = "Process is capable. Monitor for shifts and continue process control."
+    elif cpk >= 1.0:
+        if abs(cpu - cpl) > 0.2:
+            recommendations = "Process is marginally capable. Focus on centering the process to improve Cpk."
+        else:
+            recommendations = "Process is marginally capable. Focus on reducing variation to improve capability."
+    else:
+        if abs(cpu - cpl) > 0.2:
+            recommendations = "Process is not capable. Priority: center the process and reduce variation."
+        else:
+            recommendations = "Process is not capable. Priority: reduce process variation significantly."
+    
+    return {
+        'sample_size': n,
+        'mean': mean,
+        'std_dev': std_dev,
+        'usl': usl,
+        'lsl': lsl,
+        'target': target,
+        'cp': cp,
+        'cpk': cpk,
+        'pp': pp,
+        'ppk': ppk,
+        'cp_interpretation': cp_interpretation,
+        'cpk_interpretation': cpk_interpretation,
+        'sigma_level': sigma_level,
+        'percent_within_spec': percent_within_spec,
+        'estimated_ppm_defects': estimated_ppm_defects,
+        'process_performance': process_performance,
+        'centering': centering,
+        'recommendations': recommendations
+    }
+
+
+def western_electric_rules(
+    data: list[float],
+    centerline: float,
+    sigma: float,
+    rules_to_apply: list[int] = None
+) -> dict[str, Any]:
+    """
+    Apply Western Electric run rules to detect non-random patterns.
+    
+    Use Cases:
+    - Early warning of process shifts before out-of-control points
+    - Detect systematic patterns indicating assignable causes
+    - Identify tool wear, shift changes, or raw material variation
+    - Supplement traditional control limits
+    - Automated process monitoring and alarming
+    
+    Rules Implemented:
+    1. One point beyond 3σ
+    2. Two out of three consecutive points beyond 2σ (same side)
+    3. Four out of five consecutive points beyond 1σ (same side)
+    4. Eight consecutive points on same side of centerline
+    5. Six points in a row steadily increasing or decreasing
+    6. Fifteen points in a row within 1σ of centerline (both sides)
+    7. Fourteen points in a row alternating up and down
+    8. Eight points in a row beyond 1σ (either side)
+    
+    Args:
+        data: Process measurements in time order (min 15 items)
+        centerline: Process centerline (mean)
+        sigma: Process standard deviation
+        rules_to_apply: Which rules to check (default: all 8 rules)
+        
+    Returns:
+        Dictionary containing:
+        - violations: List of rule violations with details
+        - total_violations: Number of violations detected
+        - process_status: Overall status
+        - action_required: Recommended actions
+        - pattern_detected: Description of patterns
+        
+    Raises:
+        ValueError: If parameters are invalid
+        
+    Examples:
+        western_electric_rules([100]*10 + [103]*10, centerline=100, sigma=0.5)
+        >>> {
+        ...   'violations': [{
+        ...     'rule': 4,
+        ...     'rule_name': 'Eight consecutive points same side',
+        ...     'severity': 'warning'
+        ...   }],
+        ...   'process_status': 'Out of Statistical Control'
+        ... }
+    """
+    # Validate input
+    if not isinstance(data, list):
+        raise ValueError(f"data must be a list, got {type(data).__name__}")
+    
+    if len(data) < 15:
+        raise ValueError("data must contain at least 15 items for Western Electric rules")
+    
+    for i, value in enumerate(data):
+        if not isinstance(value, (int, float)):
+            raise ValueError(f"All data values must be numeric. Item at index {i} is {type(value).__name__}")
+    
+    # Validate centerline and sigma
+    if not isinstance(centerline, (int, float)):
+        raise ValueError(f"centerline must be numeric, got {type(centerline).__name__}")
+    
+    if not isinstance(sigma, (int, float)):
+        raise ValueError(f"sigma must be numeric, got {type(sigma).__name__}")
+    
+    if sigma <= 0:
+        raise ValueError(f"sigma must be positive, got {sigma}")
+    
+    # Set default rules if not provided
+    if rules_to_apply is None:
+        rules_to_apply = [1, 2, 3, 4, 5, 6, 7, 8]
+    
+    # Validate rules_to_apply
+    if not isinstance(rules_to_apply, list):
+        raise ValueError(f"rules_to_apply must be a list, got {type(rules_to_apply).__name__}")
+    
+    for rule in rules_to_apply:
+        if not isinstance(rule, int) or rule < 1 or rule > 8:
+            raise ValueError(f"All rules must be integers between 1 and 8, got {rule}")
+    
+    violations = []
+    
+    # Rule 1: One point beyond 3σ
+    if 1 in rules_to_apply:
+        for i, value in enumerate(data):
+            if abs(value - centerline) > 3 * sigma:
+                violations.append({
+                    'rule': 1,
+                    'rule_name': 'One point beyond 3σ',
+                    'indices': [i],
+                    'severity': 'critical',
+                    'description': f"Point {i} (value: {value:.4f}) is {abs(value - centerline) / sigma:.2f}σ {'above' if value > centerline else 'below'} centerline"
+                })
+    
+    # Rule 2: Two out of three consecutive points beyond 2σ (same side)
+    if 2 in rules_to_apply:
+        for i in range(len(data) - 2):
+            window = data[i:i+3]
+            above_2sigma = sum(1 for v in window if v - centerline > 2 * sigma)
+            below_2sigma = sum(1 for v in window if centerline - v > 2 * sigma)
+            
+            if above_2sigma >= 2:
+                indices = [i+j for j, v in enumerate(window) if v - centerline > 2 * sigma]
+                violations.append({
+                    'rule': 2,
+                    'rule_name': 'Two out of three beyond 2σ (same side)',
+                    'indices': indices,
+                    'severity': 'warning',
+                    'description': f"Points {indices} are beyond 2σ above centerline"
+                })
+            elif below_2sigma >= 2:
+                indices = [i+j for j, v in enumerate(window) if centerline - v > 2 * sigma]
+                violations.append({
+                    'rule': 2,
+                    'rule_name': 'Two out of three beyond 2σ (same side)',
+                    'indices': indices,
+                    'severity': 'warning',
+                    'description': f"Points {indices} are beyond 2σ below centerline"
+                })
+    
+    # Rule 3: Four out of five consecutive points beyond 1σ (same side)
+    if 3 in rules_to_apply:
+        for i in range(len(data) - 4):
+            window = data[i:i+5]
+            above_1sigma = sum(1 for v in window if v - centerline > sigma)
+            below_1sigma = sum(1 for v in window if centerline - v > sigma)
+            
+            if above_1sigma >= 4:
+                indices = [i+j for j, v in enumerate(window) if v - centerline > sigma]
+                violations.append({
+                    'rule': 3,
+                    'rule_name': 'Four out of five beyond 1σ (same side)',
+                    'indices': indices,
+                    'severity': 'warning',
+                    'description': f"Points {indices} are beyond 1σ above centerline"
+                })
+            elif below_1sigma >= 4:
+                indices = [i+j for j, v in enumerate(window) if centerline - v > sigma]
+                violations.append({
+                    'rule': 3,
+                    'rule_name': 'Four out of five beyond 1σ (same side)',
+                    'indices': indices,
+                    'severity': 'warning',
+                    'description': f"Points {indices} are beyond 1σ below centerline"
+                })
+    
+    # Rule 4: Eight consecutive points on same side of centerline
+    if 4 in rules_to_apply:
+        for i in range(len(data) - 7):
+            window = data[i:i+8]
+            all_above = all(v > centerline for v in window)
+            all_below = all(v < centerline for v in window)
+            
+            if all_above or all_below:
+                indices = list(range(i, i+8))
+                violations.append({
+                    'rule': 4,
+                    'rule_name': 'Eight consecutive points same side',
+                    'indices': indices,
+                    'severity': 'warning',
+                    'description': f"8 consecutive points {'above' if all_above else 'below'} centerline indicates process shift"
+                })
+    
+    # Rule 5: Six points in a row steadily increasing or decreasing
+    if 5 in rules_to_apply:
+        for i in range(len(data) - 5):
+            window = data[i:i+6]
+            increasing = all(window[j+1] > window[j] for j in range(5))
+            decreasing = all(window[j+1] < window[j] for j in range(5))
+            
+            if increasing or decreasing:
+                indices = list(range(i, i+6))
+                violations.append({
+                    'rule': 5,
+                    'rule_name': 'Six points steadily increasing/decreasing',
+                    'indices': indices,
+                    'severity': 'warning',
+                    'description': f"6 points steadily {'increasing' if increasing else 'decreasing'} indicates trend"
+                })
+    
+    # Rule 6: Fifteen points in a row within 1σ of centerline
+    if 6 in rules_to_apply:
+        for i in range(len(data) - 14):
+            window = data[i:i+15]
+            all_within_1sigma = all(abs(v - centerline) < sigma for v in window)
+            
+            if all_within_1sigma:
+                indices = list(range(i, i+15))
+                violations.append({
+                    'rule': 6,
+                    'rule_name': 'Fifteen points within 1σ',
+                    'indices': indices,
+                    'severity': 'info',
+                    'description': "15 points within 1σ may indicate stratification or measurement issues"
+                })
+    
+    # Rule 7: Fourteen points in a row alternating up and down
+    if 7 in rules_to_apply:
+        for i in range(len(data) - 13):
+            window = data[i:i+14]
+            alternating = all(
+                (window[j+1] > window[j] and window[j+2] < window[j+1]) or
+                (window[j+1] < window[j] and window[j+2] > window[j+1])
+                for j in range(12)
+            )
+            
+            if alternating:
+                indices = list(range(i, i+14))
+                violations.append({
+                    'rule': 7,
+                    'rule_name': 'Fourteen points alternating',
+                    'indices': indices,
+                    'severity': 'info',
+                    'description': "14 points alternating up and down indicates systematic variation"
+                })
+    
+    # Rule 8: Eight points in a row beyond 1σ (either side)
+    if 8 in rules_to_apply:
+        for i in range(len(data) - 7):
+            window = data[i:i+8]
+            all_beyond_1sigma = all(abs(v - centerline) > sigma for v in window)
+            
+            if all_beyond_1sigma:
+                indices = list(range(i, i+8))
+                violations.append({
+                    'rule': 8,
+                    'rule_name': 'Eight points beyond 1σ',
+                    'indices': indices,
+                    'severity': 'warning',
+                    'description': "8 points beyond 1σ (either side) indicates mixture or bi-modal distribution"
+                })
+    
+    # Determine overall status
+    total_violations = len(violations)
+    
+    if total_violations == 0:
+        process_status = "In Statistical Control"
+        action_required = "Continue monitoring process"
+        pattern_detected = "No non-random patterns detected"
+    else:
+        process_status = "Out of Statistical Control"
+        
+        # Identify patterns
+        patterns = []
+        rule_counts = {}
+        for v in violations:
+            rule = v['rule']
+            rule_counts[rule] = rule_counts.get(rule, 0) + 1
+        
+        if 1 in rule_counts:
+            patterns.append("outliers")
+        if 4 in rule_counts or 5 in rule_counts:
+            patterns.append("trend")
+        if 2 in rule_counts or 3 in rule_counts:
+            patterns.append("shift")
+        if 6 in rule_counts:
+            patterns.append("stratification")
+        if 7 in rule_counts:
+            patterns.append("alternating")
+        if 8 in rule_counts:
+            patterns.append("mixture")
+        
+        pattern_detected = " and ".join(patterns).capitalize() if patterns else "Multiple patterns"
+        
+        # Generate action
+        critical_violations = [v for v in violations if v.get('severity') == 'critical']
+        if critical_violations:
+            action_required = f"Immediate investigation required for critical violations at points {[v['indices'][0] for v in critical_violations]}"
+        else:
+            action_required = "Investigate assignable causes and take corrective action"
+    
+    return {
+        'violations': violations,
+        'total_violations': total_violations,
+        'process_status': process_status,
+        'action_required': action_required,
+        'pattern_detected': pattern_detected
+    }
+
+
+def cusum_chart(
+    data: list[float],
+    target: float,
+    k: float = None,
+    h: float = None,
+    sigma: float = None
+) -> dict[str, Any]:
+    """
+    Implement CUSUM (Cumulative Sum) chart for detecting small persistent shifts.
+    
+    Use Cases:
+    - Detect gradual process drift
+    - Monitor slow equipment degradation
+    - Identify small but persistent quality shifts
+    - More sensitive than traditional control charts for small shifts (<1.5σ)
+    - Track process improvements over time
+    
+    Args:
+        data: Process measurements in time order (min 5 items)
+        target: Target process value
+        k: Reference value (typically 0.5σ), defaults to 0.5 if sigma provided
+        h: Decision interval (typically 4σ or 5σ), defaults to 4 if sigma provided
+        sigma: Process standard deviation (optional, estimated from data if not provided)
+        
+    Returns:
+        Dictionary containing:
+        - cusum_positive: Positive CUSUM values
+        - cusum_negative: Negative CUSUM values
+        - upper_limit: Upper decision limit (h)
+        - lower_limit: Lower decision limit (-h)
+        - signals: List of detected shifts with details
+        - process_status: Overall status
+        - estimated_new_level: Estimated process level after shift (if detected)
+        - recommendation: Actionable recommendation
+        
+    Raises:
+        ValueError: If parameters are invalid
+        
+    Examples:
+        cusum_chart([100]*10 + [101]*10, target=100, sigma=0.5)
+        >>> {
+        ...   'signals': [{
+        ...     'index': 14,
+        ...     'type': 'positive_shift',
+        ...     'magnitude_estimate': 1.0
+        ...   }],
+        ...   'process_status': 'Shift detected'
+        ... }
+    """
+    # Validate input
+    if not isinstance(data, list):
+        raise ValueError(f"data must be a list, got {type(data).__name__}")
+    
+    if len(data) < 5:
+        raise ValueError("data must contain at least 5 items")
+    
+    for i, value in enumerate(data):
+        if not isinstance(value, (int, float)):
+            raise ValueError(f"All data values must be numeric. Item at index {i} is {type(value).__name__}")
+    
+    # Validate target
+    if not isinstance(target, (int, float)):
+        raise ValueError(f"target must be numeric, got {type(target).__name__}")
+    
+    # Estimate sigma if not provided
+    if sigma is None:
+        mean = sum(data) / len(data)
+        sigma = (sum((x - mean) ** 2 for x in data) / len(data)) ** 0.5
+        if sigma < 1e-10:
+            raise ValueError("Cannot calculate CUSUM: data has zero or near-zero variation")
+    else:
+        if not isinstance(sigma, (int, float)):
+            raise ValueError(f"sigma must be numeric, got {type(sigma).__name__}")
+        if sigma <= 0:
+            raise ValueError(f"sigma must be positive, got {sigma}")
+    
+    # Set default k and h if not provided
+    if k is None:
+        k = 0.5 * sigma
+    else:
+        if not isinstance(k, (int, float)):
+            raise ValueError(f"k must be numeric, got {type(k).__name__}")
+    
+    if h is None:
+        h = 4 * sigma
+    else:
+        if not isinstance(h, (int, float)):
+            raise ValueError(f"h must be numeric, got {type(h).__name__}")
+    
+    # Calculate CUSUM
+    cusum_positive = [0.0]
+    cusum_negative = [0.0]
+    signals = []
+    
+    for i, value in enumerate(data):
+        # Positive CUSUM (detects upward shifts)
+        c_plus = max(0, cusum_positive[-1] + (value - target) - k)
+        cusum_positive.append(c_plus)
+        
+        # Negative CUSUM (detects downward shifts)
+        c_minus = max(0, cusum_negative[-1] - (value - target) - k)
+        cusum_negative.append(c_minus)
+        
+        # Check for signals
+        if c_plus > h:
+            # Estimate change point (approximate)
+            change_point = max(0, i - int(c_plus / (2 * k)))
+            magnitude = c_plus / (i - change_point + 1) if (i - change_point) > 0 else 2 * k
+            
+            signals.append({
+                'index': i,
+                'type': 'positive_shift',
+                'cusum_value': c_plus,
+                'estimated_change_point': change_point,
+                'magnitude_estimate': magnitude
+            })
+            
+            # Reset CUSUM after signal
+            cusum_positive[-1] = 0
+        
+        if c_minus > h:
+            # Estimate change point
+            change_point = max(0, i - int(c_minus / (2 * k)))
+            magnitude = -c_minus / (i - change_point + 1) if (i - change_point) > 0 else -2 * k
+            
+            signals.append({
+                'index': i,
+                'type': 'negative_shift',
+                'cusum_value': c_minus,
+                'estimated_change_point': change_point,
+                'magnitude_estimate': magnitude
+            })
+            
+            # Reset CUSUM after signal
+            cusum_negative[-1] = 0
+    
+    # Determine process status
+    if len(signals) == 0:
+        process_status = "In Control - No shifts detected"
+        estimated_new_level = None
+        recommendation = "Process is stable at target level. Continue monitoring."
+    else:
+        last_signal = signals[-1]
+        process_status = f"Shift detected at point {last_signal['index']}"
+        estimated_new_level = target + last_signal['magnitude_estimate']
+        
+        shift_direction = "upward" if last_signal['type'] == 'positive_shift' else "downward"
+        recommendation = (
+            f"Process has shifted {shift_direction} by approximately "
+            f"{abs(last_signal['magnitude_estimate']):.4f} units starting around point "
+            f"{last_signal['estimated_change_point']}. Investigate and take corrective action."
+        )
+    
+    return {
+        'cusum_positive': cusum_positive,
+        'cusum_negative': cusum_negative,
+        'upper_limit': h,
+        'lower_limit': -h,
+        'signals': signals,
+        'process_status': process_status,
+        'estimated_new_level': estimated_new_level,
+        'recommendation': recommendation
+    }
+
+
+def ewma_chart(
+    data: list[float],
+    target: float,
+    sigma: float,
+    lambda_param: float = 0.2,
+    l: float = 3.0
+) -> dict[str, Any]:
+    """
+    Implement EWMA (Exponentially Weighted Moving Average) chart for detecting small shifts.
+    
+    Use Cases:
+    - Monitor processes where small shifts are critical
+    - Detect shifts faster than X-bar charts
+    - Smooth noisy process data
+    - Balance between Shewhart and CUSUM charts
+    - Track chemical composition or pharmaceutical potency
+    
+    Args:
+        data: Process measurements (min 5 items)
+        target: Target process mean
+        sigma: Process standard deviation
+        lambda_param: Weighting factor (0-1, typical: 0.2), higher = more weight on recent data
+        l: Control limit factor (typical: 3), multiplies standard error
+        
+    Returns:
+        Dictionary containing:
+        - ewma_values: EWMA values for each data point
+        - ucl_values: Upper control limit values
+        - lcl_values: Lower control limit values
+        - target: Target value
+        - out_of_control_points: Indices of points beyond limits
+        - out_of_control_details: Details of violations
+        - process_status: Overall status
+        - recommendation: Actionable recommendation
+        
+    Raises:
+        ValueError: If parameters are invalid
+        
+    Examples:
+        ewma_chart([100]*10 + [100.5]*10, target=100, sigma=0.2, lambda_param=0.2)
+        >>> {
+        ...   'ewma_values': [100, 100, ..., 100.4, 100.45, 100.5],
+        ...   'process_status': 'Shift detected',
+        ...   'out_of_control_points': [15, 16, 17, 18, 19]
+        ... }
+    """
+    # Validate input
+    if not isinstance(data, list):
+        raise ValueError(f"data must be a list, got {type(data).__name__}")
+    
+    if len(data) < 5:
+        raise ValueError("data must contain at least 5 items")
+    
+    for i, value in enumerate(data):
+        if not isinstance(value, (int, float)):
+            raise ValueError(f"All data values must be numeric. Item at index {i} is {type(value).__name__}")
+    
+    # Validate target
+    if not isinstance(target, (int, float)):
+        raise ValueError(f"target must be numeric, got {type(target).__name__}")
+    
+    # Validate sigma
+    if not isinstance(sigma, (int, float)):
+        raise ValueError(f"sigma must be numeric, got {type(sigma).__name__}")
+    
+    if sigma <= 0:
+        raise ValueError(f"sigma must be positive, got {sigma}")
+    
+    # Validate lambda_param
+    if not isinstance(lambda_param, (int, float)):
+        raise ValueError(f"lambda_param must be numeric, got {type(lambda_param).__name__}")
+    
+    if lambda_param < 0.01 or lambda_param > 1.0:
+        raise ValueError(f"lambda_param must be between 0.01 and 1.0, got {lambda_param}")
+    
+    # Validate l
+    if not isinstance(l, (int, float)):
+        raise ValueError(f"l must be numeric, got {type(l).__name__}")
+    
+    if l <= 0:
+        raise ValueError(f"l must be positive, got {l}")
+    
+    # Calculate EWMA
+    ewma_values = [target]  # Initialize with target
+    ucl_values = []
+    lcl_values = []
+    out_of_control_points = []
+    out_of_control_details = []
+    
+    for i, value in enumerate(data):
+        # Calculate EWMA: Z_t = λ * X_t + (1 - λ) * Z_{t-1}
+        ewma = lambda_param * value + (1 - lambda_param) * ewma_values[-1]
+        ewma_values.append(ewma)
+        
+        # Calculate control limits
+        # Standard error: sigma * sqrt(λ / (2 - λ) * [1 - (1 - λ)^(2*t)])
+        t = i + 1
+        factor = (lambda_param / (2 - lambda_param)) * (1 - (1 - lambda_param) ** (2 * t))
+        std_error = sigma * (factor ** 0.5)
+        
+        ucl = target + l * std_error
+        lcl = target - l * std_error
+        
+        ucl_values.append(ucl)
+        lcl_values.append(lcl)
+        
+        # Check for out of control points
+        if ewma > ucl:
+            out_of_control_points.append(i)
+            out_of_control_details.append({
+                'index': i,
+                'value': value,
+                'ewma': ewma,
+                'violation': 'above_ucl'
+            })
+        elif ewma < lcl:
+            out_of_control_points.append(i)
+            out_of_control_details.append({
+                'index': i,
+                'value': value,
+                'ewma': ewma,
+                'violation': 'below_lcl'
+            })
+    
+    # Remove initial target value from ewma_values (it's not a data point)
+    ewma_values = ewma_values[1:]
+    
+    # Determine process status
+    if len(out_of_control_points) == 0:
+        process_status = "In Control - Process centered at target"
+        recommendation = "Process is stable. Continue monitoring with EWMA chart."
+    else:
+        process_status = f"Out of Control - {len(out_of_control_points)} points beyond EWMA limits"
+        
+        # Determine shift direction
+        above_count = sum(1 for d in out_of_control_details if d['violation'] == 'above_ucl')
+        below_count = sum(1 for d in out_of_control_details if d['violation'] == 'below_lcl')
+        
+        if above_count > below_count:
+            shift_direction = "upward"
+        elif below_count > above_count:
+            shift_direction = "downward"
+        else:
+            shift_direction = "in both directions"
+        
+        recommendation = (
+            f"EWMA detected {shift_direction} shift at points {', '.join(map(str, out_of_control_points))}. "
+            f"Investigate process change and take corrective action."
+        )
+    
+    return {
+        'ewma_values': ewma_values,
+        'ucl_values': ucl_values,
+        'lcl_values': lcl_values,
+        'target': target,
+        'out_of_control_points': out_of_control_points,
+        'out_of_control_details': out_of_control_details,
+        'process_status': process_status,
+        'recommendation': recommendation
+    }
+
+
+# ============================================================================
+# MCP Server Setup
 # ============================================================================
 
 # Create the MCP server instance
@@ -2671,6 +4798,409 @@ async def list_tools() -> list[Tool]:
             }
         ),
         Tool(
+            name="control_limits",
+            description=(
+                "Calculate control chart limits (UCL, LCL, centerline) for various chart types "
+                "including X-bar, Individuals, Range, Standard Deviation, and attribute charts (p, np, c, u). "
+                "Essential for manufacturing quality control, process monitoring, and Six Sigma programs. "
+                "Detects out-of-control points and provides actionable recommendations."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Process measurements or subgroup statistics",
+                        "minItems": 5
+                    },
+                    "chart_type": {
+                        "type": "string",
+                        "enum": ["x_bar", "individuals", "range", "std_dev", "p", "np", "c", "u"],
+                        "description": "Type of control chart"
+                    },
+                    "subgroup_size": {
+                        "type": "integer",
+                        "description": "Size of subgroups (for X-bar, R, and S charts)",
+                        "minimum": 2,
+                        "maximum": 25,
+                        "default": 5
+                    },
+                    "sigma_level": {
+                        "type": "number",
+                        "description": "Number of standard deviations for limits (typical: 3)",
+                        "minimum": 1,
+                        "maximum": 6,
+                        "default": 3
+                    }
+                },
+                "required": ["data", "chart_type"]
+            }
+        ),
+        Tool(
+            name="process_capability",
+            description=(
+                "Calculate process capability indices (Cp, Cpk, Pp, Ppk) to assess if a process "
+                "meets customer specifications. Essential for Six Sigma programs, supplier qualification, "
+                "and process validation. Provides sigma level, estimated defect rates (PPM), and "
+                "actionable recommendations for process improvement."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Process measurements (minimum 30 for reliable analysis)",
+                        "minItems": 30
+                    },
+                    "usl": {
+                        "type": "number",
+                        "description": "Upper specification limit"
+                    },
+                    "lsl": {
+                        "type": "number",
+                        "description": "Lower specification limit"
+                    },
+                    "target": {
+                        "type": "number",
+                        "description": "Target value (optional, defaults to midpoint of USL and LSL)"
+                    }
+                },
+                "required": ["data", "usl", "lsl"]
+            }
+        ),
+        Tool(
+            name="western_electric_rules",
+            description=(
+                "Apply Western Electric run rules to detect non-random patterns in control charts. "
+                "Implements 8 rules for early warning of process shifts, trends, and systematic variation. "
+                "More sensitive than traditional control limits for detecting assignable causes before "
+                "they result in out-of-control points. Essential for proactive process monitoring."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Process measurements in time order",
+                        "minItems": 15
+                    },
+                    "centerline": {
+                        "type": "number",
+                        "description": "Process centerline (mean)"
+                    },
+                    "sigma": {
+                        "type": "number",
+                        "description": "Process standard deviation"
+                    },
+                    "rules_to_apply": {
+                        "type": "array",
+                        "items": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 8
+                        },
+                        "description": "Which rules to check (1-8, default: all rules)",
+                        "default": [1, 2, 3, 4, 5, 6, 7, 8]
+                    }
+                },
+                "required": ["data", "centerline", "sigma"]
+            }
+        ),
+        Tool(
+            name="cusum_chart",
+            description=(
+                "Implement CUSUM (Cumulative Sum) chart for detecting small persistent shifts in process mean. "
+                "More sensitive than traditional control charts for detecting shifts less than 1.5σ. "
+                "Ideal for monitoring gradual equipment degradation, process drift, and small but "
+                "persistent quality changes. Provides change point estimation and shift magnitude."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Process measurements in time order",
+                        "minItems": 5
+                    },
+                    "target": {
+                        "type": "number",
+                        "description": "Target process value"
+                    },
+                    "k": {
+                        "type": "number",
+                        "description": "Reference value (typically 0.5σ, auto-calculated if not provided)"
+                    },
+                    "h": {
+                        "type": "number",
+                        "description": "Decision interval (typically 4σ or 5σ, auto-calculated if not provided)"
+                    },
+                    "sigma": {
+                        "type": "number",
+                        "description": "Process standard deviation (optional, estimated from data if not provided)"
+                    }
+                },
+                "required": ["data", "target"]
+            }
+        ),
+        Tool(
+            name="ewma_chart",
+            description=(
+                "Implement EWMA (Exponentially Weighted Moving Average) chart for detecting small shifts "
+                "in process mean. Balances between Shewhart and CUSUM charts by smoothing data while "
+                "remaining sensitive to shifts. Ideal for noisy processes where small shifts are critical "
+                "(e.g., chemical composition, pharmaceutical potency). Configurable weighting factor."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Process measurements",
+                        "minItems": 5
+                    },
+                    "target": {
+                        "type": "number",
+                        "description": "Target process mean"
+                    },
+                    "sigma": {
+                        "type": "number",
+                        "description": "Process standard deviation"
+                    },
+                    "lambda_param": {
+                        "type": "number",
+                        "description": "Weighting factor (0-1, typical: 0.2, higher = more weight on recent data)",
+                        "minimum": 0.01,
+                        "maximum": 1.0,
+                        "default": 0.2
+                    },
+                    "l": {
+                        "type": "number",
+                        "description": "Control limit factor (typical: 3)",
+                        "default": 3.0
+                    }
+                },
+                "required": ["data", "target", "sigma"]
+            }
+        ),
+        Tool(
+            name="fft_analysis",
+            description=(
+                "Perform Fast Fourier Transform (FFT) for frequency domain analysis. "
+                "Use cases: bearing defect detection (BPFI, BPFO, BSF), motor electrical faults, "
+                "gearbox mesh frequency analysis, pump cavitation, compressor valve problems, fan imbalance."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "signal": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Time-domain signal (vibration, current, acoustic, etc.)",
+                        "minItems": 8
+                    },
+                    "sample_rate": {
+                        "type": "number",
+                        "description": "Sampling frequency in Hz",
+                        "minimum": 1,
+                        "maximum": 1000000
+                    },
+                    "window": {
+                        "type": "string",
+                        "enum": ["hanning", "hamming", "blackman", "rectangular"],
+                        "default": "hanning",
+                        "description": "Windowing function to reduce spectral leakage"
+                    },
+                    "detrend": {
+                        "type": "boolean",
+                        "default": True,
+                        "description": "Remove DC component and linear trends"
+                    }
+                },
+                "required": ["signal", "sample_rate"]
+            }
+        ),
+        Tool(
+            name="power_spectral_density",
+            description=(
+                "Calculate Power Spectral Density (PSD) for energy distribution across frequencies. "
+                "Use cases: vibration energy distribution, noise level assessment, random vibration analysis, "
+                "process variable frequency content, acoustic signature analysis."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "signal": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Time-domain signal",
+                        "minItems": 16
+                    },
+                    "sample_rate": {
+                        "type": "number",
+                        "description": "Sampling frequency in Hz"
+                    },
+                    "method": {
+                        "type": "string",
+                        "enum": ["welch", "periodogram"],
+                        "default": "welch",
+                        "description": "PSD estimation method - Welch is more accurate for noisy signals"
+                    },
+                    "nperseg": {
+                        "type": "integer",
+                        "default": 256,
+                        "description": "Length of each segment for Welch method"
+                    }
+                },
+                "required": ["signal", "sample_rate"]
+            }
+        ),
+        Tool(
+            name="rms_value",
+            description=(
+                "Calculate Root Mean Square (RMS) for overall signal energy. "
+                "Use cases: overall vibration severity (ISO 10816), electrical current RMS, "
+                "acoustic noise level, process variable stability, alarm threshold monitoring, trend tracking."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "signal": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Time-domain signal",
+                        "minItems": 2
+                    },
+                    "window_size": {
+                        "type": "integer",
+                        "description": "Calculate rolling RMS (optional)",
+                        "minimum": 2
+                    },
+                    "reference_value": {
+                        "type": "number",
+                        "description": "Reference for dB calculation (e.g., 20 µPa for acoustic)"
+                    }
+                },
+                "required": ["signal"]
+            }
+        ),
+        Tool(
+            name="peak_detection",
+            description=(
+                "Identify significant peaks in signals with filtering and ranking. "
+                "Use cases: find dominant vibration frequencies, detect harmonic patterns, "
+                "identify resonance frequencies, bearing fault frequency detection, gear mesh frequencies."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "signal": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Signal data (time or frequency domain)",
+                        "minItems": 3
+                    },
+                    "frequencies": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Corresponding frequencies (for frequency domain data)"
+                    },
+                    "height": {
+                        "type": "number",
+                        "default": 0.1,
+                        "description": "Minimum peak height"
+                    },
+                    "distance": {
+                        "type": "integer",
+                        "default": 1,
+                        "description": "Minimum samples between peaks"
+                    },
+                    "prominence": {
+                        "type": "number",
+                        "default": 0.05,
+                        "description": "Required prominence (height above surroundings)"
+                    },
+                    "top_n": {
+                        "type": "integer",
+                        "default": 10,
+                        "maximum": 50,
+                        "description": "Return top N peaks only"
+                    }
+                },
+                "required": ["signal"]
+            }
+        ),
+        Tool(
+            name="signal_to_noise_ratio",
+            description=(
+                "Calculate Signal-to-Noise Ratio (SNR) to assess signal quality. "
+                "Use cases: sensor health monitoring, data acquisition quality check, "
+                "communication signal quality, measurement reliability, instrumentation validation."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "signal": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Signal containing signal + noise",
+                        "minItems": 10
+                    },
+                    "noise": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Noise reference (optional - will estimate if not provided)"
+                    },
+                    "method": {
+                        "type": "string",
+                        "enum": ["power", "amplitude", "peak"],
+                        "default": "power",
+                        "description": "SNR calculation method"
+                    }
+                },
+                "required": ["signal"]
+            }
+        ),
+        Tool(
+            name="harmonic_analysis",
+            description=(
+                "Detect and analyze harmonic content in electrical and mechanical signals. "
+                "Use cases: power quality assessment (THD), variable frequency drive effects, "
+                "motor current signature analysis (MCSA), electrical fault detection, IEEE 519 compliance."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "signal": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Periodic signal (voltage, current, vibration)",
+                        "minItems": 64
+                    },
+                    "sample_rate": {
+                        "type": "number",
+                        "description": "Sampling frequency in Hz"
+                    },
+                    "fundamental_freq": {
+                        "type": "number",
+                        "description": "Expected fundamental frequency (e.g., 60 Hz for electrical)",
+                        "minimum": 1
+                    },
+                    "max_harmonic": {
+                        "type": "integer",
+                        "default": 50,
+                        "maximum": 100,
+                        "description": "Maximum harmonic order to analyze"
+                    }
+                },
+                "required": ["signal", "sample_rate", "fundamental_freq"]
+            }
+        ),
+        Tool(
             name="linear_regression",
             description=(
                 "Perform simple or multiple linear regression with comprehensive diagnostics. "
@@ -2888,16 +5418,28 @@ async def call_tool(name: str, arguments: Any) -> CallToolResult:
             return await handle_rate_of_change(arguments)
         elif name == "rolling_statistics":
             return await handle_rolling_statistics(arguments)
-        elif name == "linear_regression":
-            return await handle_linear_regression(arguments)
-        elif name == "polynomial_regression":
-            return await handle_polynomial_regression(arguments)
-        elif name == "residual_analysis":
-            return await handle_residual_analysis(arguments)
-        elif name == "prediction_with_intervals":
-            return await handle_prediction_with_intervals(arguments)
-        elif name == "multivariate_regression":
-            return await handle_multivariate_regression(arguments)
+        elif name == "fft_analysis":
+            return await handle_fft_analysis(arguments)
+        elif name == "power_spectral_density":
+            return await handle_power_spectral_density(arguments)
+        elif name == "rms_value":
+            return await handle_rms_value(arguments)
+        elif name == "peak_detection":
+            return await handle_peak_detection(arguments)
+        elif name == "signal_to_noise_ratio":
+            return await handle_signal_to_noise_ratio(arguments)
+        elif name == "harmonic_analysis":
+            return await handle_harmonic_analysis(arguments)
+        elif name == "control_limits":
+            return await handle_control_limits(arguments)
+        elif name == "process_capability":
+            return await handle_process_capability(arguments)
+        elif name == "western_electric_rules":
+            return await handle_western_electric_rules(arguments)
+        elif name == "cusum_chart":
+            return await handle_cusum_chart(arguments)
+        elif name == "ewma_chart":
+            return await handle_ewma_chart(arguments)
         else:
             # Unknown tool name
             logger.error(f"Unknown tool requested: {name}")
@@ -3471,6 +6013,37 @@ async def handle_change_point_detection(arguments: Any) -> CallToolResult:
     
     # Detect change points
     try:
+        # Route to appropriate handler based on tool name
+        if name == "descriptive_stats":
+            return await handle_descriptive_stats(arguments)
+        elif name == "correlation":
+            return await handle_correlation(arguments)
+        elif name == "percentile":
+            return await handle_percentile(arguments)
+        elif name == "detect_outliers":
+            return await handle_detect_outliers(arguments)
+        elif name == "moving_average":
+            return await handle_moving_average(arguments)
+        elif name == "detect_trend":
+            return await handle_detect_trend(arguments)
+        elif name == "autocorrelation":
+            return await handle_autocorrelation(arguments)
+        elif name == "change_point_detection":
+            return await handle_change_point_detection(arguments)
+        elif name == "rate_of_change":
+            return await handle_rate_of_change(arguments)
+        elif name == "rolling_statistics":
+            return await handle_rolling_statistics(arguments)
+        elif name == "linear_regression":
+            return await handle_linear_regression(arguments)
+        elif name == "polynomial_regression":
+            return await handle_polynomial_regression(arguments)
+        elif name == "residual_analysis":
+            return await handle_residual_analysis(arguments)
+        elif name == "prediction_with_intervals":
+            return await handle_prediction_with_intervals(arguments)
+        elif name == "multivariate_regression":
+            return await handle_multivariate_regression(arguments)
         logger.info(f"Detecting change points using {method} method")
         result = change_point_detection(data, method, threshold, min_size)
         
@@ -3644,6 +6217,728 @@ async def handle_rolling_statistics(arguments: Any) -> CallToolResult:
         result_text += f"  • Implement sliding window quality checks"
         
         logger.info(f"Calculated rolling statistics for {len(statistics)} metrics")
+        
+        return CallToolResult(
+            content=[TextContent(type="text", text=result_text)],
+            isError=False,
+        )
+        
+    except ValueError as e:
+        logger.error(f"Validation error: {e}")
+        return CallToolResult(
+            content=[TextContent(type="text", text=f"Validation error: {str(e)}")],
+            isError=True,
+        )
+
+
+async def handle_fft_analysis(arguments: Any) -> CallToolResult:
+    """Handle fft_analysis tool calls."""
+    # Extract and validate parameters
+    signal_data = arguments.get("signal")
+    sample_rate = arguments.get("sample_rate")
+    window = arguments.get("window", "hanning")
+    detrend = arguments.get("detrend", True)
+    
+    # Validate required parameters
+    if signal_data is None:
+        logger.error("Missing required parameter: signal")
+        return CallToolResult(
+            content=[TextContent(type="text", text="Missing required parameter 'signal'")],
+            isError=True,
+        )
+    
+    if sample_rate is None:
+        logger.error("Missing required parameter: sample_rate")
+        return CallToolResult(
+            content=[TextContent(type="text", text="Missing required parameter 'sample_rate'")],
+            isError=True,
+        )
+    
+    # Perform FFT analysis
+    try:
+        logger.info(f"Performing FFT analysis on {len(signal_data)} samples at {sample_rate} Hz")
+        result = fft_analysis(signal_data, sample_rate, window, detrend)
+        
+        # Format the result
+        result_text = f"FFT Analysis Results:\n\n"
+        result_text += f"Signal Properties:\n"
+        result_text += f"  Sample Rate: {result['sample_rate']:.2f} Hz\n"
+        result_text += f"  Signal Length: {result['signal_length']} samples\n"
+        result_text += f"  Duration: {result['duration_seconds']:.4f} seconds\n"
+        result_text += f"  Nyquist Frequency: {result['nyquist_frequency']:.2f} Hz\n"
+        result_text += f"  Frequency Resolution: {result['resolution']:.4f} Hz\n\n"
+        
+        result_text += f"Dominant Frequencies:\n"
+        if result['dominant_frequencies']:
+            for i, peak in enumerate(result['dominant_frequencies'][:5], 1):
+                result_text += f"  {i}. {peak['frequency']:.2f} Hz - Magnitude: {peak['magnitude']:.4f}"
+                if peak['interpretation']:
+                    result_text += f" ({peak['interpretation']})"
+                result_text += "\n"
+        else:
+            result_text += "  No dominant frequencies detected\n"
+        
+        result_text += f"\nInterpretation: {result['interpretation']}\n\n"
+        
+        result_text += f"Use Cases:\n"
+        result_text += f"  • Bearing defect detection (BPFI, BPFO, BSF frequencies)\n"
+        result_text += f"  • Motor electrical faults (broken rotor bars)\n"
+        result_text += f"  • Gearbox mesh frequency analysis\n"
+        result_text += f"  • Pump cavitation detection"
+        
+        logger.info(f"FFT analysis completed, found {len(result['dominant_frequencies'])} dominant frequencies")
+        
+        return CallToolResult(
+            content=[TextContent(type="text", text=result_text)],
+            isError=False
+        )
+    except Exception as e:
+        logger.error(f"Error in fft_analysis: {str(e)}")
+        return CallToolResult(
+            content=[TextContent(type="text", text=f"Error performing FFT analysis: {str(e)}")],
+            isError=True
+        )
+
+
+async def handle_control_limits(arguments: Any) -> CallToolResult:
+    """Handle control_limits tool calls."""
+    data = arguments.get("data")
+    chart_type = arguments.get("chart_type")
+    subgroup_size = arguments.get("subgroup_size", 5)
+    sigma_level = arguments.get("sigma_level", 3.0)
+    
+    # Validate required parameters
+    if data is None:
+        return CallToolResult(
+            content=[TextContent(type="text", text="Missing required parameter 'data'")],
+            isError=True,
+        )
+    
+    if chart_type is None:
+        return CallToolResult(
+            content=[TextContent(type="text", text="Missing required parameter 'chart_type'")],
+            isError=True,
+        )
+    
+    try:
+        logger.info(f"Calculating control limits for {chart_type} chart")
+        result = control_limits(data, chart_type, subgroup_size, sigma_level)
+        
+        # Format the result
+        result_text = f"Control Chart Analysis ({result['chart_type'].upper()}):\n\n"
+        result_text += f"Control Limits:\n"
+        result_text += f"  Centerline (CL): {result['centerline']:.4f}\n"
+        result_text += f"  Upper Control Limit (UCL): {result['ucl']:.4f}\n"
+        result_text += f"  Lower Control Limit (LCL): {result['lcl']:.4f}\n"
+        result_text += f"  Sigma: {result['sigma']:.4f}\n"
+        result_text += f"  Subgroup Size: {result['subgroup_size']}\n"
+        result_text += f"  Data Points: {result['data_points']}\n\n"
+        
+        result_text += f"Process Status: {result['process_status']}\n\n"
+        
+        if result['out_of_control_points']:
+            result_text += f"Out of Control Points ({len(result['out_of_control_points'])}):\n"
+            for detail in result['out_of_control_details'][:10]:  # Show first 10
+                result_text += f"  Index {detail['index']}: {detail['value']:.4f} ({detail['violation']})\n"
+            if len(result['out_of_control_details']) > 10:
+                result_text += f"  ... and {len(result['out_of_control_details']) - 10} more\n"
+            result_text += "\n"
+        
+        result_text += f"Recommendations:\n  {result['recommendations']}"
+        
+        logger.info(f"Control limits calculated: UCL={result['ucl']:.4f}, LCL={result['lcl']:.4f}")
+        
+        return CallToolResult(
+            content=[TextContent(type="text", text=result_text)],
+            isError=False,
+        )
+        
+    except ValueError as e:
+        logger.error(f"Validation error: {e}")
+        return CallToolResult(
+            content=[TextContent(type="text", text=f"Validation error: {str(e)}")],
+            isError=True,
+        )
+
+
+async def handle_power_spectral_density(arguments: Any) -> CallToolResult:
+    """Handle power_spectral_density tool calls."""
+    # Extract and validate parameters
+    signal_data = arguments.get("signal")
+    sample_rate = arguments.get("sample_rate")
+    method = arguments.get("method", "welch")
+    nperseg = arguments.get("nperseg", 256)
+    
+    # Validate required parameters
+    if signal_data is None:
+        logger.error("Missing required parameter: signal")
+        return CallToolResult(
+            content=[TextContent(type="text", text="Missing required parameter 'signal'")],
+            isError=True,
+        )
+    
+    if sample_rate is None:
+        logger.error("Missing required parameter: sample_rate")
+        return CallToolResult(
+            content=[TextContent(type="text", text="Missing required parameter 'sample_rate'")],
+            isError=True,
+        )
+    
+    # Calculate PSD
+    try:
+        logger.info(f"Calculating {method} PSD for {len(signal_data)} samples")
+        result = power_spectral_density(signal_data, sample_rate, method, nperseg)
+        
+        # Format the result
+        result_text = f"Power Spectral Density Analysis:\n\n"
+        result_text += f"Method: {result['method']}\n"
+        result_text += f"Total Power: {result['total_power']:.4f}\n"
+        result_text += f"Peak Frequency: {result['peak_frequency']:.2f} Hz\n"
+        result_text += f"Peak Power: {result['peak_power']:.4f}\n\n"
+        
+        result_text += f"Interpretation: {result['interpretation']}\n\n"
+        
+        result_text += f"Use Cases:\n"
+        result_text += f"  • Vibration energy distribution analysis\n"
+        result_text += f"  • Noise level assessment\n"
+        result_text += f"  • Random vibration analysis\n"
+        result_text += f"  • Acoustic signature analysis"
+        
+        logger.info(f"PSD calculated, peak at {result['peak_frequency']:.2f} Hz")
+        
+        return CallToolResult(
+            content=[TextContent(type="text", text=result_text)],
+            isError=False
+        )
+    except Exception as e:
+        logger.error(f"Error in power_spectral_density: {str(e)}")
+        return CallToolResult(
+            content=[TextContent(type="text", text=f"Error calculating PSD: {str(e)}")],
+            isError=True
+        )
+
+
+async def handle_process_capability(arguments: Any) -> CallToolResult:
+    """Handle process_capability tool calls."""
+    data = arguments.get("data")
+    usl = arguments.get("usl")
+    lsl = arguments.get("lsl")
+    target = arguments.get("target")
+    
+    # Validate required parameters
+    if data is None:
+        return CallToolResult(
+            content=[TextContent(type="text", text="Missing required parameter 'data'")],
+            isError=True,
+        )
+    
+    if usl is None:
+        return CallToolResult(
+            content=[TextContent(type="text", text="Missing required parameter 'usl'")],
+            isError=True,
+        )
+    
+    if lsl is None:
+        return CallToolResult(
+            content=[TextContent(type="text", text="Missing required parameter 'lsl'")],
+            isError=True,
+        )
+    
+    try:
+        logger.info(f"Calculating process capability for {len(data)} measurements")
+        result = process_capability(data, usl, lsl, target)
+        
+        # Format the result
+        result_text = f"Process Capability Analysis:\n\n"
+        result_text += f"Sample Statistics:\n"
+        result_text += f"  Sample Size: {result['sample_size']}\n"
+        result_text += f"  Mean: {result['mean']:.4f}\n"
+        result_text += f"  Std Dev: {result['std_dev']:.4f}\n\n"
+        
+        result_text += f"Specification Limits:\n"
+        result_text += f"  USL: {result['usl']:.4f}\n"
+        result_text += f"  LSL: {result['lsl']:.4f}\n"
+        result_text += f"  Target: {result['target']:.4f}\n\n"
+        
+        result_text += f"Capability Indices:\n"
+        result_text += f"  Cp (Potential Capability): {result['cp']:.4f} - {result['cp_interpretation']}\n"
+        result_text += f"  Cpk (Actual Capability): {result['cpk']:.4f} - {result['cpk_interpretation']}\n"
+        result_text += f"  Pp (Overall Performance): {result['pp']:.4f}\n"
+        result_text += f"  Ppk (Overall Performance): {result['ppk']:.4f}\n\n"
+        
+        result_text += f"Process Performance:\n"
+        result_text += f"  Sigma Level: {result['sigma_level']:.2f}\n"
+        result_text += f"  % Within Spec: {result['percent_within_spec']:.4f}%\n"
+        result_text += f"  Est. PPM Defects: {result['estimated_ppm_defects']:.2f}\n"
+        result_text += f"  Overall: {result['process_performance']}\n\n"
+        
+        result_text += f"Centering: {result['centering']}\n\n"
+        result_text += f"Recommendations:\n  {result['recommendations']}"
+        
+        logger.info(f"Capability: Cp={result['cp']:.2f}, Cpk={result['cpk']:.2f}")
+        
+        return CallToolResult(
+            content=[TextContent(type="text", text=result_text)],
+            isError=False,
+        )
+        
+    except ValueError as e:
+        logger.error(f"Validation error: {e}")
+        return CallToolResult(
+            content=[TextContent(type="text", text=f"Validation error: {str(e)}")],
+            isError=True,
+        )
+
+
+async def handle_rms_value(arguments: Any) -> CallToolResult:
+    """Handle rms_value tool calls."""
+    # Extract and validate parameters
+    signal_data = arguments.get("signal")
+    window_size = arguments.get("window_size")
+    reference_value = arguments.get("reference_value")
+    
+    # Validate required parameter
+    if signal_data is None:
+        logger.error("Missing required parameter: signal")
+        return CallToolResult(
+            content=[TextContent(type="text", text="Missing required parameter 'signal'")],
+            isError=True,
+        )
+    
+    # Calculate RMS
+    try:
+        logger.info(f"Calculating RMS for {len(signal_data)} samples")
+        result = rms_value(signal_data, window_size, reference_value)
+        
+        # Format the result
+        result_text = f"RMS Analysis Results:\n\n"
+        result_text += f"Overall RMS: {result['rms']:.4f}\n"
+        result_text += f"Peak Value: {result['peak']:.4f}\n"
+        result_text += f"Crest Factor: {result['crest_factor']:.2f}\n"
+        
+        if 'rms_db' in result:
+            result_text += f"RMS (dB): {result['rms_db']:.2f} dB\n"
+        
+        result_text += f"\nInterpretation: {result['interpretation']}\n"
+        
+        if 'rolling_rms' in result:
+            rolling = result['rolling_rms']
+            result_text += f"\nRolling RMS Statistics:\n"
+            result_text += f"  Number of windows: {len(rolling)}\n"
+            result_text += f"  Trend: {result['trend']}\n"
+            if len(rolling) <= 10:
+                result_text += f"  Values: {', '.join(f'{v:.4f}' for v in rolling)}\n"
+            else:
+                result_text += f"  First 5: {', '.join(f'{v:.4f}' for v in rolling[:5])}\n"
+                result_text += f"  Last 5: {', '.join(f'{v:.4f}' for v in rolling[-5:])}\n"
+        
+        result_text += f"\nUse Cases:\n"
+        result_text += f"  • Overall vibration severity (ISO 10816)\n"
+        result_text += f"  • Electrical current RMS for power calculations\n"
+        result_text += f"  • Acoustic noise level assessment\n"
+        result_text += f"  • Process variable stability monitoring"
+        
+        logger.info(f"RMS calculated: {result['rms']:.4f}")
+        
+        return CallToolResult(
+            content=[TextContent(type="text", text=result_text)],
+            isError=False,
+        )
+        
+    except ValueError as e:
+        logger.error(f"Validation error: {e}")
+        return CallToolResult(
+            content=[TextContent(type="text", text=f"Validation error: {str(e)}")],
+            isError=True,
+        )
+
+
+async def handle_peak_detection(arguments: Any) -> CallToolResult:
+    """Handle peak_detection tool calls."""
+    # Extract and validate parameters
+    signal_data = arguments.get("signal")
+    frequencies = arguments.get("frequencies")
+    height = arguments.get("height", 0.1)
+    distance = arguments.get("distance", 1)
+    prominence = arguments.get("prominence", 0.05)
+    top_n = arguments.get("top_n", 10)
+    
+    # Validate required parameter
+    if signal_data is None:
+        logger.error("Missing required parameter: signal")
+        return CallToolResult(
+            content=[TextContent(type="text", text="Missing required parameter 'signal'")],
+            isError=True,
+        )
+    
+    # Detect peaks
+    try:
+        logger.info(f"Detecting peaks in signal with {len(signal_data)} samples")
+        result = peak_detection(signal_data, frequencies, height, distance, prominence, top_n)
+        
+        # Format the result
+        result_text = f"Peak Detection Results:\n\n"
+        result_text += f"Total Peaks Found: {result['peaks_found']}\n"
+        result_text += f"Interpretation: {result['interpretation']}\n\n"
+        
+        if result['top_peaks']:
+            result_text += f"Top Peaks:\n"
+            for peak in result['top_peaks']:
+                result_text += f"  Rank {peak['rank']}: "
+                if 'frequency' in peak:
+                    result_text += f"Frequency {peak['frequency']:.2f} Hz, "
+                result_text += f"Magnitude {peak['magnitude']:.4f}, "
+                result_text += f"Prominence {peak['prominence']:.4f}"
+                if 'interpretation' in peak and peak['interpretation']:
+                    result_text += f" - {peak['interpretation']}"
+                result_text += "\n"
+        else:
+            result_text += "No significant peaks detected.\n"
+        
+        result_text += f"\nUse Cases:\n"
+        result_text += f"  • Find dominant vibration frequencies\n"
+        result_text += f"  • Detect harmonic patterns in power quality\n"
+        result_text += f"  • Identify resonance frequencies\n"
+        result_text += f"  • Bearing fault frequency detection"
+        
+        logger.info(f"Peak detection completed, found {result['peaks_found']} peaks")
+        
+        return CallToolResult(
+            content=[TextContent(type="text", text=result_text)],
+            isError=False
+        )
+    except Exception as e:
+        logger.error(f"Error in peak_detection: {str(e)}")
+        return CallToolResult(
+            content=[TextContent(type="text", text=f"Error detecting peaks: {str(e)}")],
+            isError=True
+        )
+
+
+async def handle_western_electric_rules(arguments: Any) -> CallToolResult:
+    """Handle western_electric_rules tool calls."""
+    data = arguments.get("data")
+    centerline = arguments.get("centerline")
+    sigma = arguments.get("sigma")
+    rules_to_apply = arguments.get("rules_to_apply")
+    
+    # Validate required parameters
+    if data is None:
+        return CallToolResult(
+            content=[TextContent(type="text", text="Missing required parameter 'data'")],
+            isError=True,
+        )
+    
+    if centerline is None:
+        return CallToolResult(
+            content=[TextContent(type="text", text="Missing required parameter 'centerline'")],
+            isError=True,
+        )
+    
+    if sigma is None:
+        return CallToolResult(
+            content=[TextContent(type="text", text="Missing required parameter 'sigma'")],
+            isError=True,
+        )
+    
+    try:
+        logger.info(f"Applying Western Electric rules to {len(data)} measurements")
+        result = western_electric_rules(data, centerline, sigma, rules_to_apply)
+        
+        # Format the result
+        result_text = f"Western Electric Rules Analysis:\n\n"
+        result_text += f"Process Status: {result['process_status']}\n"
+        result_text += f"Total Violations: {result['total_violations']}\n"
+        result_text += f"Pattern Detected: {result['pattern_detected']}\n\n"
+        
+        if result['violations']:
+            result_text += f"Rule Violations:\n"
+            for v in result['violations'][:10]:  # Show first 10
+                result_text += f"\n  Rule {v['rule']}: {v['rule_name']}\n"
+                result_text += f"    Severity: {v['severity']}\n"
+                result_text += f"    Indices: {v['indices'][:10]}"  # Show first 10 indices
+                if len(v['indices']) > 10:
+                    result_text += f" ... and {len(v['indices']) - 10} more"
+                result_text += f"\n    {v['description']}\n"
+            
+            if len(result['violations']) > 10:
+                result_text += f"\n  ... and {len(result['violations']) - 10} more violations\n"
+        else:
+            result_text += f"No violations detected. Process is in statistical control.\n"
+        
+        result_text += f"\nAction Required:\n  {result['action_required']}"
+        
+        logger.info(f"Found {result['total_violations']} rule violations")
+        
+        return CallToolResult(
+            content=[TextContent(type="text", text=result_text)],
+            isError=False,
+        )
+        
+    except ValueError as e:
+        logger.error(f"Validation error: {e}")
+        return CallToolResult(
+            content=[TextContent(type="text", text=f"Validation error: {str(e)}")],
+            isError=True,
+        )
+
+
+async def handle_signal_to_noise_ratio(arguments: Any) -> CallToolResult:
+    """Handle signal_to_noise_ratio tool calls."""
+    # Extract and validate parameters
+    signal_data = arguments.get("signal")
+    noise_data = arguments.get("noise")
+    method = arguments.get("method", "power")
+    
+    # Validate required parameter
+    if signal_data is None:
+        logger.error("Missing required parameter: signal")
+        return CallToolResult(
+            content=[TextContent(type="text", text="Missing required parameter 'signal'")],
+            isError=True,
+        )
+    
+    # Calculate SNR
+    try:
+        logger.info(f"Calculating SNR using {method} method")
+        result = signal_to_noise_ratio(signal_data, noise_data, method)
+        
+        # Format the result
+        result_text = f"Signal-to-Noise Ratio Analysis:\n\n"
+        result_text += f"SNR: {result['snr_db']:.2f} dB\n"
+        result_text += f"SNR Ratio: {result['snr_ratio']:.2f}\n"
+        result_text += f"Signal Power: {result['signal_power']:.4f}\n"
+        result_text += f"Noise Power: {result['noise_power']:.4f}\n"
+        result_text += f"Quality: {result['quality']}\n\n"
+        
+        result_text += f"Interpretation: {result['interpretation']}\n\n"
+        
+        result_text += f"Use Cases:\n"
+        result_text += f"  • Sensor health monitoring\n"
+        result_text += f"  • Data acquisition quality check\n"
+        result_text += f"  • Process measurement reliability\n"
+        result_text += f"  • Instrumentation validation"
+        
+        logger.info(f"SNR calculated: {result['snr_db']:.2f} dB ({result['quality']})")
+        
+        return CallToolResult(
+            content=[TextContent(type="text", text=result_text)],
+            isError=False
+        )
+    except Exception as e:
+        logger.error(f"Error in signal_to_noise_ratio: {str(e)}")
+        return CallToolResult(
+            content=[TextContent(type="text", text=f"Error calculating SNR: {str(e)}")],
+            isError=True
+        )
+
+
+async def handle_cusum_chart(arguments: Any) -> CallToolResult:
+    """Handle cusum_chart tool calls."""
+    data = arguments.get("data")
+    target = arguments.get("target")
+    k = arguments.get("k")
+    h = arguments.get("h")
+    sigma = arguments.get("sigma")
+    
+    # Validate required parameters
+    if data is None:
+        return CallToolResult(
+            content=[TextContent(type="text", text="Missing required parameter 'data'")],
+            isError=True,
+        )
+    
+    if target is None:
+        return CallToolResult(
+            content=[TextContent(type="text", text="Missing required parameter 'target'")],
+            isError=True,
+        )
+    
+    try:
+        logger.info(f"Calculating CUSUM chart for {len(data)} measurements")
+        result = cusum_chart(data, target, k, h, sigma)
+        
+        # Format the result
+        result_text = f"CUSUM Chart Analysis:\n\n"
+        result_text += f"Process Status: {result['process_status']}\n\n"
+        
+        result_text += f"Control Limits:\n"
+        result_text += f"  Upper Limit (H): {result['upper_limit']:.4f}\n"
+        result_text += f"  Lower Limit (-H): {result['lower_limit']:.4f}\n\n"
+        
+        if result['signals']:
+            result_text += f"Signals Detected ({len(result['signals'])}):\n"
+            for signal in result['signals']:
+                result_text += f"\n  Signal at Index {signal['index']}:\n"
+                result_text += f"    Type: {signal['type']}\n"
+                result_text += f"    CUSUM Value: {signal['cusum_value']:.4f}\n"
+                result_text += f"    Est. Change Point: {signal['estimated_change_point']}\n"
+                result_text += f"    Est. Magnitude: {signal['magnitude_estimate']:.4f}\n"
+            
+            if result['estimated_new_level'] is not None:
+                result_text += f"\n  Estimated New Level: {result['estimated_new_level']:.4f}\n"
+        else:
+            result_text += f"No shifts detected. Process is stable at target level.\n"
+        
+        result_text += f"\nRecommendation:\n  {result['recommendation']}"
+        
+        logger.info(f"CUSUM: {len(result['signals'])} shifts detected")
+        
+        return CallToolResult(
+            content=[TextContent(type="text", text=result_text)],
+            isError=False,
+        )
+        
+    except ValueError as e:
+        logger.error(f"Validation error: {e}")
+        return CallToolResult(
+            content=[TextContent(type="text", text=f"Validation error: {str(e)}")],
+            isError=True,
+        )
+
+
+async def handle_harmonic_analysis(arguments: Any) -> CallToolResult:
+    """Handle harmonic_analysis tool calls."""
+    # Extract and validate parameters
+    signal_data = arguments.get("signal")
+    sample_rate = arguments.get("sample_rate")
+    fundamental_freq = arguments.get("fundamental_freq")
+    max_harmonic = arguments.get("max_harmonic", 50)
+    
+    # Validate required parameters
+    if signal_data is None:
+        logger.error("Missing required parameter: signal")
+        return CallToolResult(
+            content=[TextContent(type="text", text="Missing required parameter 'signal'")],
+            isError=True,
+        )
+    
+    if sample_rate is None:
+        logger.error("Missing required parameter: sample_rate")
+        return CallToolResult(
+            content=[TextContent(type="text", text="Missing required parameter 'sample_rate'")],
+            isError=True,
+        )
+    
+    if fundamental_freq is None:
+        logger.error("Missing required parameter: fundamental_freq")
+        return CallToolResult(
+            content=[TextContent(type="text", text="Missing required parameter 'fundamental_freq'")],
+            isError=True,
+        )
+    
+    # Perform harmonic analysis
+    try:
+        logger.info(f"Performing harmonic analysis with fundamental {fundamental_freq} Hz")
+        result = harmonic_analysis(signal_data, sample_rate, fundamental_freq, max_harmonic)
+        
+        # Format the result
+        result_text = f"Harmonic Analysis Results:\n\n"
+        result_text += f"Fundamental Frequency:\n"
+        result_text += f"  Frequency: {result['fundamental']['frequency']:.2f} Hz\n"
+        result_text += f"  Magnitude: {result['fundamental']['magnitude']:.4f}\n\n"
+        
+        result_text += f"Total Harmonic Distortion (THD): {result['thd']:.2f}%\n"
+        result_text += f"Assessment: {result['thd_interpretation']}\n\n"
+        
+        if result['dominant_harmonics']:
+            result_text += f"Dominant Harmonics: {', '.join(map(str, result['dominant_harmonics']))}\n\n"
+        
+        if result['harmonics']:
+            result_text += f"Harmonic Components (showing top 10):\n"
+            for i, harm in enumerate(result['harmonics'][:10], 1):
+                result_text += f"  H{harm['order']}: {harm['frequency']:.2f} Hz, "
+                result_text += f"Magnitude {harm['magnitude']:.4f} ({harm['percent']:.1f}% of fundamental)\n"
+        else:
+            result_text += "No significant harmonics detected.\n"
+        
+        result_text += f"\nInterpretation: {result['interpretation']}\n\n"
+        
+        result_text += f"Use Cases:\n"
+        result_text += f"  • Power quality assessment (THD calculation)\n"
+        result_text += f"  • Variable frequency drive (VFD) effects\n"
+        result_text += f"  • Motor current signature analysis (MCSA)\n"
+        result_text += f"  • IEEE 519 compliance verification"
+        
+        logger.info(f"Harmonic analysis completed, THD = {result['thd']:.2f}%")
+        
+        return CallToolResult(
+            content=[TextContent(type="text", text=result_text)],
+            isError=False
+        )
+    except Exception as e:
+        logger.error(f"Error in harmonic_analysis: {str(e)}")
+        return CallToolResult(
+            content=[TextContent(type="text", text=f"Error performing harmonic analysis: {str(e)}")],
+            isError=True
+        )
+
+
+async def handle_ewma_chart(arguments: Any) -> CallToolResult:
+    """Handle ewma_chart tool calls."""
+    data = arguments.get("data")
+    target = arguments.get("target")
+    sigma = arguments.get("sigma")
+    lambda_param = arguments.get("lambda_param", 0.2)
+    l = arguments.get("l", 3.0)
+    
+    # Validate required parameters
+    if data is None:
+        return CallToolResult(
+            content=[TextContent(type="text", text="Missing required parameter 'data'")],
+            isError=True,
+        )
+    
+    if target is None:
+        return CallToolResult(
+            content=[TextContent(type="text", text="Missing required parameter 'target'")],
+            isError=True,
+        )
+    
+    if sigma is None:
+        return CallToolResult(
+            content=[TextContent(type="text", text="Missing required parameter 'sigma'")],
+            isError=True,
+        )
+    
+    try:
+        logger.info(f"Calculating EWMA chart for {len(data)} measurements")
+        result = ewma_chart(data, target, sigma, lambda_param, l)
+        
+        # Format the result
+        result_text = f"EWMA Chart Analysis:\n\n"
+        result_text += f"Process Status: {result['process_status']}\n\n"
+        
+        result_text += f"Configuration:\n"
+        result_text += f"  Target: {result['target']:.4f}\n"
+        result_text += f"  Lambda (λ): {lambda_param:.2f}\n"
+        result_text += f"  Control Limit Factor (L): {l:.1f}\n\n"
+        
+        # Show first few and last few EWMA values
+        ewma_vals = result['ewma_values']
+        if len(ewma_vals) <= 10:
+            result_text += f"EWMA Values:\n"
+            for i, val in enumerate(ewma_vals):
+                result_text += f"  Point {i}: {val:.4f}\n"
+        else:
+            result_text += f"EWMA Values (showing first 5 and last 5):\n"
+            result_text += f"  First 5: {', '.join(f'{v:.4f}' for v in ewma_vals[:5])}\n"
+            result_text += f"  Last 5:  {', '.join(f'{v:.4f}' for v in ewma_vals[-5:])}\n"
+        
+        result_text += "\n"
+        
+        if result['out_of_control_points']:
+            result_text += f"Out of Control Points ({len(result['out_of_control_points'])}):\n"
+            for detail in result['out_of_control_details'][:10]:  # Show first 10
+                result_text += f"  Index {detail['index']}: Value={detail['value']:.4f}, EWMA={detail['ewma']:.4f} ({detail['violation']})\n"
+            if len(result['out_of_control_details']) > 10:
+                result_text += f"  ... and {len(result['out_of_control_details']) - 10} more\n"
+        else:
+            result_text += f"All points within EWMA control limits.\n"
+        
+        result_text += f"\nRecommendation:\n  {result['recommendation']}"
+        
+        logger.info(f"EWMA: {len(result['out_of_control_points'])} out-of-control points")
         
         return CallToolResult(
             content=[TextContent(type="text", text=result_text)],
