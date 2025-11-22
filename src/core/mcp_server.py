@@ -14,7 +14,7 @@ import sys
 from abc import ABC, abstractmethod
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Any
+from typing import Optional, Any, List
 
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
@@ -126,7 +126,7 @@ class BaseMCPServer(ABC):
         """Setup MCP protocol handlers."""
         
         @self.app.list_tools()
-        async def list_tools() -> list[Tool]:
+        async def list_tools() -> List[Tool]:
             """List all available tools."""
             return self.tool_registry.list_tools()
         

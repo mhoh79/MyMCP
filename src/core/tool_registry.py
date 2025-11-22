@@ -4,7 +4,7 @@ Tool registration and management utilities for MCP servers.
 This module provides the ToolRegistry class for managing MCP tools.
 """
 
-from typing import Dict, Callable, Any, Optional
+from typing import Dict, Callable, Any, Optional, List
 from mcp.types import Tool
 
 
@@ -76,7 +76,7 @@ class ToolRegistry:
         """
         return self.tools.get(tool_name)
     
-    def list_tools(self) -> list[Tool]:
+    def list_tools(self) -> List[Tool]:
         """
         Get a list of all registered tools.
         

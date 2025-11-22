@@ -67,3 +67,9 @@ config-test-*.yaml
 
 # Server launcher process management
 .pids
+
+# Test coverage
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
