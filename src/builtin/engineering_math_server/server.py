@@ -1,12 +1,13 @@
 """
 Engineering Math MCP Server - Foundation for specialized engineering servers.
 
-This server provides 31+ core mathematical tools across 5 categories:
+This server provides 35+ core mathematical tools across 6 categories:
 - Linear Algebra & Matrix Mathematics (6 tools)
 - Calculus & Analysis (9 tools)
 - Numerical Methods & Equation Solving (5 tools)
 - Polynomial & Algebraic Structures (4 tools)
 - Cross-Cutting Utilities (7 tools)
+- Complex Analysis (4 tools)
 """
 
 import sys
@@ -57,6 +58,11 @@ from .tools import (
     handle_equation_balancer,
     handle_significant_figures,
     handle_error_propagation,
+    # Complex analysis handlers
+    handle_complex_operations,
+    handle_complex_functions,
+    handle_roots_of_unity,
+    handle_complex_conjugate_operations,
 )
 
 
@@ -76,7 +82,7 @@ class EngineeringMathServer(BaseMCPServer):
     """
     
     def register_tools(self) -> None:
-        """Register all 31+ engineering math tools."""
+        """Register all 35+ engineering math tools."""
         # Tool name to handler mapping
         tool_handlers = {
             # Linear Algebra (6 tools)
@@ -119,6 +125,12 @@ class EngineeringMathServer(BaseMCPServer):
             "equation_balancer": handle_equation_balancer,
             "significant_figures": handle_significant_figures,
             "error_propagation": handle_error_propagation,
+            
+            # Complex Analysis (4 tools)
+            "complex_operations": handle_complex_operations,
+            "complex_functions": handle_complex_functions,
+            "roots_of_unity": handle_roots_of_unity,
+            "complex_conjugate_operations": handle_complex_conjugate_operations,
         }
         
         # Register each tool with its handler
@@ -142,7 +154,7 @@ def main():
     """Entry point for the Engineering Math MCP Server."""
     # Create argument parser with server description
     parser = BaseMCPServer.create_argument_parser(
-        description="Engineering Math MCP Server - Provides 31+ core mathematical tools"
+        description="Engineering Math MCP Server - Provides 35+ core mathematical tools"
     )
     args = parser.parse_args()
     

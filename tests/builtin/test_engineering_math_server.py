@@ -19,11 +19,11 @@ def test_engineering_math_server_initialization():
 
 
 def test_engineering_math_server_tools_registration():
-    """Test that all 31 engineering math tools are properly registered."""
+    """Test that all 35 engineering math tools are properly registered."""
     server = EngineeringMathServer()
     
-    # Should have 31 tools registered
-    assert server.tool_registry.count() == 31
+    # Should have 35 tools registered (31 original + 4 complex analysis)
+    assert server.tool_registry.count() == 35
     
     # Check linear algebra tools exist
     linear_algebra_tools = [
@@ -76,6 +76,18 @@ def test_engineering_math_server_tools_registration():
     
     for tool_name in utility_tools:
         assert server.tool_registry.tool_exists(tool_name), f"Tool {tool_name} not found"
+    
+    # Check complex analysis tools exist
+    complex_analysis_tools = [
+        "complex_operations",
+        "complex_functions",
+        "roots_of_unity",
+        "complex_conjugate_operations"
+    ]
+    
+    for tool_name in complex_analysis_tools:
+        assert server.tool_registry.tool_exists(tool_name), f"Tool {tool_name} not found"
+        assert server.tool_registry.get_handler(tool_name) is not None
 
 
 def test_engineering_math_server_tool_list():
@@ -83,7 +95,7 @@ def test_engineering_math_server_tool_list():
     server = EngineeringMathServer()
     tools = server.tool_registry.list_tools()
     
-    assert len(tools) == 31
+    assert len(tools) == 35
     
     # Verify tool names are unique
     tool_names = [tool.name for tool in tools]
@@ -286,6 +298,72 @@ async def test_interpolation_handler():
     
     assert result.isError is False
     assert "interpolated_values" in result.content[0].text
+
+
+@pytest.mark.asyncio
+async def test_complex_operations_handler():
+    """Test complex operations tool handler."""
+    server = EngineeringMathServer()
+    handler = server.tool_registry.get_handler("complex_operations")
+    
+    # Test complex addition
+    result = await handler({
+        "z1": "3+4j",
+        "operation": "add",
+        "z2": "1-2j"
+    })
+    
+    assert result.isError is False
+    assert "4" in result.content[0].text
+    assert "2" in result.content[0].text
+
+
+@pytest.mark.asyncio
+async def test_complex_functions_handler():
+    """Test complex functions tool handler."""
+    server = EngineeringMathServer()
+    handler = server.tool_registry.get_handler("complex_functions")
+    
+    # Test complex exponential
+    result = await handler({
+        "z": "0+0j",
+        "function": "exp"
+    })
+    
+    assert result.isError is False
+    assert "1" in result.content[0].text
+
+
+@pytest.mark.asyncio
+async def test_roots_of_unity_handler():
+    """Test roots of unity tool handler."""
+    server = EngineeringMathServer()
+    handler = server.tool_registry.get_handler("roots_of_unity")
+    
+    # Test 4th roots of unity
+    result = await handler({
+        "n": 4
+    })
+    
+    assert result.isError is False
+    assert "4" in result.content[0].text
+    assert "roots" in result.content[0].text
+
+
+@pytest.mark.asyncio
+async def test_complex_conjugate_operations_handler():
+    """Test complex conjugate operations tool handler."""
+    server = EngineeringMathServer()
+    handler = server.tool_registry.get_handler("complex_conjugate_operations")
+    
+    # Test conjugate
+    result = await handler({
+        "z": "3+4j",
+        "operation": "conjugate"
+    })
+    
+    assert result.isError is False
+    assert "-4" in result.content[0].text
 
 
 @pytest.mark.asyncio

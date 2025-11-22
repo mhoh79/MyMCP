@@ -55,13 +55,22 @@ from .utilities import (
     handle_error_propagation,
 )
 
+from .complex_analysis import (
+    COMPLEX_ANALYSIS_TOOLS,
+    handle_complex_operations,
+    handle_complex_functions,
+    handle_roots_of_unity,
+    handle_complex_conjugate_operations,
+)
+
 # Combine all tools
 ALL_TOOLS = (
     LINEAR_ALGEBRA_TOOLS +
     CALCULUS_TOOLS +
     NUMERICAL_METHODS_TOOLS +
     POLYNOMIAL_TOOLS +
-    UTILITY_TOOLS
+    UTILITY_TOOLS +
+    COMPLEX_ANALYSIS_TOOLS
 )
 
 __all__ = [
@@ -72,6 +81,7 @@ __all__ = [
     "NUMERICAL_METHODS_TOOLS",
     "POLYNOMIAL_TOOLS",
     "UTILITY_TOOLS",
+    "COMPLEX_ANALYSIS_TOOLS",
     
     # Linear algebra handlers
     "handle_matrix_operations",
@@ -113,4 +123,10 @@ __all__ = [
     "handle_equation_balancer",
     "handle_significant_figures",
     "handle_error_propagation",
+    
+    # Complex analysis handlers
+    "handle_complex_operations",
+    "handle_complex_functions",
+    "handle_roots_of_unity",
+    "handle_complex_conjugate_operations",
 ]
