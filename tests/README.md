@@ -1,6 +1,6 @@
 # MCP HTTP Client Testing Suite
 
-Comprehensive test suite for validating HTTP transport, authentication, rate limiting, and all MCP tools over HTTP.
+Comprehensive test suite for validating HTTP transport, authentication, rate limiting, and all MCP tools over HTTP for **both Math and Stats servers**.
 
 ## Overview
 
@@ -13,6 +13,13 @@ This test suite validates:
 - **MCP Tools**: All available tools across multiple categories
 - **Concurrent Requests**: Multiple simultaneous requests
 - **Error Handling**: Invalid inputs, malformed JSON, unknown methods
+
+## Test Files
+
+- **`test_http_client.py`**: Math Server tests (25 tools, 44 test functions)
+- **`test_http_stats_server.py`**: Stats Server tests (32 tools, 47 test functions)
+
+Each server can be tested individually or together.
 
 ## Installation
 
@@ -30,14 +37,31 @@ pip install pytest pytest-asyncio httpx
 
 ## Running Tests
 
-### Run all tests
+### Run all tests for both servers
 
 ```bash
+./run_all_tests.sh
+```
+
+### Run Math Server tests only
+
+```bash
+./run_http_tests.sh
+# or
 pytest tests/test_http_client.py -v
+```
+
+### Run Stats Server tests only
+
+```bash
+./run_stats_tests.sh
+# or
+pytest tests/test_http_stats_server.py -v
 ```
 
 ### Run specific test categories
 
+**Math Server:**
 ```bash
 # Run only tool execution tests
 pytest tests/test_http_client.py -k "tool" -v
@@ -47,6 +71,18 @@ pytest tests/test_http_client.py -k "health" -v
 
 # Run only authentication tests
 pytest tests/test_http_client.py -k "auth" -v
+```
+
+**Stats Server:**
+```bash
+# Run only descriptive stats tests
+pytest tests/test_http_stats_server.py -k "descriptive" -v
+
+# Run only time series tests
+pytest tests/test_http_stats_server.py -k "moving_average or detect_trend" -v
+
+# Run only signal processing tests
+pytest tests/test_http_stats_server.py -k "fft or rms" -v
 
 # Run only concurrent tests
 pytest tests/test_http_client.py -k "concurrent" -v
@@ -71,16 +107,19 @@ pytest tests/test_http_client.py::test_fibonacci_tool -v
 Configure the test suite using environment variables:
 
 ```bash
-# Server URL (default: http://localhost:8000)
+# Math Server URL (default: http://localhost:8000)
 export MATH_SERVER_URL="http://localhost:8000"
+
+# Stats Server URL (default: http://localhost:8001)
+export STATS_SERVER_URL="http://localhost:8001"
 
 # API key for authentication tests (default: test-api-key-12345678)
 export MCP_API_KEY="your-api-key-here"
 ```
 
-### Testing Against Different Servers
+### Testing Individual Servers
 
-#### Local Server
+#### Math Server (Port 8000)
 
 ```bash
 # Start the server
@@ -88,26 +127,81 @@ python src/math_server/server.py --transport http --host 0.0.0.0 --port 8000
 
 # Run tests in another terminal
 pytest tests/test_http_client.py -v
+
+# Or use the test runner script
+./run_http_tests.sh
+```
+
+#### Stats Server (Port 8001)
+
+```bash
+# Start the server
+python src/stats_server/server.py --transport http --host 0.0.0.0 --port 8001
+
+# Run tests in another terminal
+pytest tests/test_http_stats_server.py -v
+
+# Or use the test runner script
+./run_stats_tests.sh
+```
+
+#### Both Servers Together
+
+```bash
+# Use the combined test runner
+./run_all_tests.sh
+
+# Test only Math server
+./run_all_tests.sh --math-only
+
+# Test only Stats server
+./run_all_tests.sh --stats-only
+
+# Test against existing servers
+./run_all_tests.sh --no-servers
+```
+
+### Testing Against Different Servers
+
+#### Local Servers
+
+```bash
+# Start both servers
+python src/math_server/server.py --transport http --host 0.0.0.0 --port 8000 &
+python src/stats_server/server.py --transport http --host 0.0.0.0 --port 8001 &
+
+# Run all tests
+./run_all_tests.sh --no-servers
 ```
 
 #### GitHub Codespaces
 
 ```bash
-# Set the Codespaces URL
+# Set the Codespaces URLs
 export MATH_SERVER_URL="https://your-codespace-8000.app.github.dev"
+export STATS_SERVER_URL="https://your-codespace-8001.app.github.dev"
 
-# Run tests
+# Run tests for both servers
+./run_all_tests.sh --no-servers
+
+# Or test individually
 pytest tests/test_http_client.py -v
+pytest tests/test_http_stats_server.py -v
 ```
 
-#### Custom Server
+#### Custom Servers
 
 ```bash
-export MATH_SERVER_URL="https://your-server.example.com:8000"
-pytest tests/test_http_client.py -v
+export MATH_SERVER_URL="https://your-math-server.example.com:8000"
+export STATS_SERVER_URL="https://your-stats-server.example.com:8001"
+./run_all_tests.sh --no-servers
 ```
 
 ## Test Categories
+
+### Math Server Tests (`test_http_client.py`)
+
+**Total: 44 tests covering 25 tools**
 
 ### SSE Connection Tests
 - `test_sse_connection_success`: Verify SSE endpoint connectivity
@@ -186,6 +280,67 @@ pytest tests/test_http_client.py -v
 ### Performance Tests
 - `test_response_time`: Response time validation
 - `test_large_response_handling`: Large response handling
+
+---
+
+### Stats Server Tests (`test_http_stats_server.py`)
+
+**Total: 47 tests covering 32 tools**
+
+#### Descriptive Statistics (4 tests)
+- `test_descriptive_stats_tool`: Calculate mean, median, mode, std dev, variance
+- `test_correlation_tool`: Pearson correlation coefficient
+- `test_percentile_tool`: Calculate percentiles
+- `test_detect_outliers_tool`: IQR-based outlier detection
+
+#### Time Series Analysis (6 tests)
+- `test_moving_average_tool`: Simple/Exponential/Weighted moving averages
+- `test_detect_trend_tool`: Linear regression trend detection
+- `test_autocorrelation_tool`: Identify cyclic patterns
+- `test_change_point_detection_tool`: Detect regime changes
+- `test_rate_of_change_tool`: Monitor acceleration/deceleration
+- `test_rolling_statistics_tool`: Windowed statistics
+
+#### Statistical Process Control (5 tests)
+- `test_control_limits_tool`: UCL, LCL, centerline for control charts
+- `test_process_capability_tool`: Cp, Cpk, Pp, Ppk indices
+- `test_western_electric_rules_tool`: 8 run rules for pattern detection
+- `test_cusum_chart_tool`: Cumulative sum for shift detection
+- `test_ewma_chart_tool`: Exponentially weighted moving average
+
+#### Signal Processing (6 tests)
+- `test_fft_analysis_tool`: Frequency domain analysis
+- `test_power_spectral_density_tool`: Energy distribution across frequencies
+- `test_rms_value_tool`: Overall signal energy
+- `test_peak_detection_tool`: Identify dominant frequencies
+- `test_signal_to_noise_ratio_tool`: SNR calculation
+- `test_harmonic_analysis_tool`: THD and power quality
+
+#### Regression Analysis (5 tests)
+- `test_linear_regression_tool`: Simple/multiple regression with diagnostics
+- `test_polynomial_regression_tool`: Non-linear curve fitting
+- `test_residual_analysis_tool`: Model assumption validation
+- `test_prediction_with_intervals_tool`: Forecasts with confidence intervals
+- `test_multivariate_regression_tool`: Multiple independent variables
+
+#### Advanced Outlier Detection (6 tests)
+- `test_z_score_detection_tool`: Z-score based outlier detection
+- `test_grubbs_test_tool`: Grubbs' test for outliers
+- `test_dixon_q_test_tool`: Dixon's Q test
+- `test_isolation_forest_tool`: ML-based outlier detection
+- `test_mahalanobis_distance_tool`: Multivariate outlier detection
+- `test_streaming_outlier_detection_tool`: Real-time outlier detection
+
+#### Protocol & Infrastructure (11 tests)
+- SSE connection tests (2)
+- MCP protocol tests (3)
+- Authentication tests (2)
+- Health endpoint tests (3)
+- Error handling tests (3)
+- Concurrent request tests (3)
+- Performance tests (1)
+
+---
 
 ## Skipped Tests
 

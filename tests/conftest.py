@@ -44,8 +44,14 @@ def pytest_collection_modifyitems(config, items):
 
 @pytest.fixture(scope="session")
 def server_url():
-    """Get server URL from environment or use default."""
+    """Get math server URL from environment or use default."""
     return os.getenv("MATH_SERVER_URL", "http://localhost:8000")
+
+
+@pytest.fixture(scope="session")
+def stats_server_url():
+    """Get stats server URL from environment or use default."""
+    return os.getenv("STATS_SERVER_URL", "http://localhost:8001")
 
 
 @pytest.fixture(scope="session")
