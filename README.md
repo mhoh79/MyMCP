@@ -1705,36 +1705,7 @@ The easiest and most reliable way to configure the servers is using the provided
 
 #### Alternative Configuration Methods
 
-**Option 1: Direct Script Paths with PYTHONPATH (Advanced)**
-
-If you prefer not to use wrapper scripts, you can set the `PYTHONPATH` environment variable:
-
-```json
-{
-  "mcpServers": {
-    "math-tools": {
-      "command": "c:/Users/YOUR_USERNAME/path/to/MyMCP/venv/Scripts/python.exe",
-      "args": [
-        "c:/Users/YOUR_USERNAME/path/to/MyMCP/src/builtin/math_server/server.py"
-      ],
-      "env": {
-        "PYTHONPATH": "c:/Users/YOUR_USERNAME/path/to/MyMCP"
-      }
-    },
-    "stats-tools": {
-      "command": "c:/Users/YOUR_USERNAME/path/to/MyMCP/venv/Scripts/python.exe",
-      "args": [
-        "c:/Users/YOUR_USERNAME/path/to/MyMCP/src/builtin/stats_server/server.py"
-      ],
-      "env": {
-        "PYTHONPATH": "c:/Users/YOUR_USERNAME/path/to/MyMCP"
-      }
-    }
-  }
-}
-```
-
-**Option 2: Module-Style Imports (Requires PYTHONPATH)**
+**Option 1: Module-Style Imports with PYTHONPATH (Advanced)**
 
 ⚠️ **Note:** This approach requires the `env` parameter with `PYTHONPATH` set:
 
@@ -1790,7 +1761,7 @@ This error occurs when Python cannot find the project modules. Here are solution
 
 **Solution 2: Set PYTHONPATH**
 - Add the `env` parameter with `PYTHONPATH` in your Claude Desktop configuration
-- See "Option 1: Direct Script Paths with PYTHONPATH" above
+- See "Option 1: Module-Style Imports with PYTHONPATH" above
 
 **Solution 3: Verify Paths**
 - Ensure all paths are **absolute** (not relative)
