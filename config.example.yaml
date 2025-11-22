@@ -1,0 +1,104 @@
+# MCP Servers Configuration
+# This is an example configuration file for the Math and Stats MCP servers.
+# Copy this file to 'config.yaml' and customize it for your environment.
+
+# Server Configuration
+# Configure host, port, and CORS settings for both servers
+server:
+  # Math Server Configuration
+  math:
+    # Host address to bind to
+    # - "0.0.0.0" - Listen on all network interfaces (allows remote connections)
+    # - "127.0.0.1" - Listen only on localhost (local connections only)
+    host: "0.0.0.0"
+    
+    # Port number for the math server
+    # Must be between 1 and 65535
+    port: 8000
+  
+  # Stats Server Configuration
+  stats:
+    # Host address to bind to
+    host: "0.0.0.0"
+    
+    # Port number for the stats server
+    # Must be different from math server port
+    port: 8001
+  
+  # CORS (Cross-Origin Resource Sharing) Configuration
+  # List of allowed origins for cross-origin requests
+  # Supports wildcards (*) for flexible matching
+  cors_origins:
+    - "http://localhost:*"           # Allow all localhost ports
+    - "https://*.app.github.dev"     # Allow GitHub Codespaces
+    # Add more origins as needed:
+    # - "https://example.com"
+    # - "http://192.168.1.100:3000"
+
+# Authentication Configuration
+authentication:
+  # Enable or disable authentication
+  # When enabled, all requests must include a valid API key
+  enabled: false
+  
+  # API Key for authentication
+  # IMPORTANT: Change this to a strong, unique key if enabling authentication
+  # Minimum length: 16 characters
+  # Recommended: Use a randomly generated key (e.g., from a password manager)
+  api_key: "your-secret-api-key-here"
+  
+  # Examples of strong API keys (do not use these):
+  # api_key: "sk_live_51234567890abcdef"
+  # api_key: "mcp_prod_secure_key_2024"
+
+# Rate Limiting Configuration
+rate_limiting:
+  # Enable or disable rate limiting
+  # When enabled, limits the number of requests per client
+  enabled: false
+  
+  # Maximum number of requests per minute per client
+  # Range: 1 to 10,000
+  # Recommended values:
+  # - Development: 120 (2 requests/second)
+  # - Production: 60 (1 request/second)
+  # - High-traffic: 300 (5 requests/second)
+  requests_per_minute: 60
+
+# Logging Configuration
+logging:
+  # Logging level for server output
+  # Options: DEBUG, INFO, WARNING, ERROR, CRITICAL
+  # 
+  # - DEBUG: Detailed information for debugging
+  # - INFO: General informational messages (recommended for production)
+  # - WARNING: Warning messages for potentially problematic situations
+  # - ERROR: Error messages for serious problems
+  # - CRITICAL: Critical messages for severe errors
+  level: "INFO"
+
+# Environment Variable Overrides
+# ================================
+# You can override any configuration value using environment variables:
+#
+# Server Configuration:
+#   MCP_MATH_HOST=127.0.0.1       - Override math server host
+#   MCP_MATH_PORT=9000            - Override math server port
+#   MCP_STATS_HOST=127.0.0.1      - Override stats server host
+#   MCP_STATS_PORT=9001           - Override stats server port
+#
+# Authentication:
+#   MCP_AUTH_ENABLED=true         - Enable authentication
+#   MCP_API_KEY=my-secret-key     - Set API key
+#
+# Rate Limiting:
+#   MCP_RATE_LIMIT_ENABLED=true   - Enable rate limiting
+#   MCP_RATE_LIMIT_RPM=120        - Set requests per minute
+#
+# Logging:
+#   MCP_LOG_LEVEL=DEBUG           - Set logging level
+#
+# Example usage:
+#   export MCP_AUTH_ENABLED=true
+#   export MCP_API_KEY="my-secure-api-key"
+#   python src/math_server/server.py --config config.yaml
