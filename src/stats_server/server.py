@@ -607,7 +607,8 @@ def z_score_detection(data: list[float], method: str = "modified", threshold: fl
     if method == "standard":
         # Standard Z-score using mean and standard deviation
         mean_val = sum(data) / len(data)
-        variance = sum((x - mean_val) ** 2 for x in data) / len(data)
+        # Use sample variance (n-1) for statistical inference
+        variance = sum((x - mean_val) ** 2 for x in data) / (len(data) - 1) if len(data) > 1 else 0
         std_dev = variance ** 0.5
         
         if std_dev < 1e-10:
@@ -788,7 +789,8 @@ def grubbs_test(data: list[float], alpha: float = 0.05, method: str = "two_sided
     
     n = len(data)
     mean_val = sum(data) / n
-    variance = sum((x - mean_val) ** 2 for x in data) / n
+    # Use sample variance (n-1) for statistical testing
+    variance = sum((x - mean_val) ** 2 for x in data) / (n - 1) if n > 1 else 0
     std_dev = variance ** 0.5
     
     if std_dev < 1e-10:
@@ -1418,7 +1420,8 @@ def streaming_outlier_detection(current_value: float, historical_window: list[fl
     # Calculate historical statistics
     n = len(historical_window)
     hist_mean = sum(historical_window) / n
-    hist_variance = sum((x - hist_mean) ** 2 for x in historical_window) / n
+    # Use sample variance (n-1) for statistical inference
+    hist_variance = sum((x - hist_mean) ** 2 for x in historical_window) / (n - 1) if n > 1 else 0
     hist_std = hist_variance ** 0.5
     
     if hist_std < 1e-10:
@@ -1503,7 +1506,9 @@ def streaming_outlier_detection(current_value: float, historical_window: list[fl
         rolling_window_size = min(50, len(historical_window))
         rolling_window = historical_window[-rolling_window_size:]
         rolling_mean = sum(rolling_window) / len(rolling_window)
-        rolling_variance = sum((x - rolling_mean) ** 2 for x in rolling_window) / len(rolling_window)
+        # Use sample variance (n-1) for statistical inference
+        n_rolling = len(rolling_window)
+        rolling_variance = sum((x - rolling_mean) ** 2 for x in rolling_window) / (n_rolling - 1) if n_rolling > 1 else 0
         rolling_std = rolling_variance ** 0.5
         
         if rolling_std < 1e-10:
