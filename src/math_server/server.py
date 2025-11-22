@@ -4886,9 +4886,8 @@ async def run_http_server(host: str = "0.0.0.0", port: int = 8000, config_path: 
     # Initialize server state for monitoring
     server_state = ServerState()
     
-    # Store for SSE connections and their async generators
+    # Store for SSE connections
     sse_connections = []
-    sse_tasks = []
     
     @fastapi_app.get("/sse")
     async def sse_endpoint(request: Request):
@@ -5049,6 +5048,8 @@ async def run_http_server(host: str = "0.0.0.0", port: int = 8000, config_path: 
         Readiness check endpoint - indicates if server is ready to accept requests.
         Returns 200 if ready, 503 if not ready.
         """
+        from fastapi.responses import JSONResponse
+        
         if server_state.mcp_initialized:
             # Get tools count
             tools_list = await list_tools()
@@ -5058,11 +5059,14 @@ async def run_http_server(host: str = "0.0.0.0", port: int = 8000, config_path: 
                 "tools_count": len(tools_list)
             }
         else:
-            return {
-                "status": "not_ready",
-                "mcp_initialized": False,
-                "tools_count": 0
-            }, 503
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "status": "not_ready",
+                    "mcp_initialized": False,
+                    "tools_count": 0
+                }
+            )
     
     @fastapi_app.get("/metrics")
     async def metrics_endpoint():
@@ -5114,7 +5118,7 @@ async def run_http_server(host: str = "0.0.0.0", port: int = 8000, config_path: 
     
     try:
         # Wait for either server completion or shutdown signal
-        done, pending = await asyncio.wait(
+        _, _ = await asyncio.wait(
             [server_task, asyncio.create_task(shutdown_event.wait())],
             return_when=asyncio.FIRST_COMPLETED
         )
