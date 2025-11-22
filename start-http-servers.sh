@@ -222,6 +222,10 @@ start_servers() {
             fi
             
             # Build command with optional --dev flag
+            # Prepend 'src.' if not already present
+            if [[ ! "$module" =~ ^src\. ]]; then
+                module="src.$module"
+            fi
             CUSTOM_CMD="python3 -m $module --transport http --host $host --port $port --config \"$CONFIG_FILE\""
             if [ "$DEV_MODE" = true ]; then
                 CUSTOM_CMD="$CUSTOM_CMD --dev"

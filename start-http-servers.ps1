@@ -356,6 +356,11 @@ function Start-Servers {
                     continue
                 }
                 
+                # Prepend 'src.' if not already present
+                if (-not $customModule.StartsWith("src.")) {
+                    $customModule = "src.$customModule"
+                }
+                
                 # Build argument list with optional --dev flag
                 $customArgs = @("-m", $customModule, "--transport", "http", "--host", $customHost, "--port", $customPort, "--config", $ConfigFile)
                 if ($DevMode) {
