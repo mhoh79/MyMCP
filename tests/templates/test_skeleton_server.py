@@ -384,7 +384,6 @@ class TestArgumentParser:
     
     def test_argument_parser_creation(self):
         """Test that argument parser can be created."""
-        from src.templates.skeleton_server.server import main
         from src.core.mcp_server import BaseMCPServer
         
         parser = BaseMCPServer.create_argument_parser(
