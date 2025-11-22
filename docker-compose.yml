@@ -1,5 +1,7 @@
 # Define reusable configurations
 x-mcp-healthcheck: &mcp-healthcheck
+  # Note: $$ is Docker Compose variable escaping syntax
+  # It becomes $ in the actual container command
   test: ["CMD-SHELL", "curl -f http://localhost:$$HEALTHCHECK_PORT/health || exit 1"]
   interval: 30s
   timeout: 5s
