@@ -24,7 +24,7 @@ services:
     environment:
       <<: *mcp-environment
       HEALTHCHECK_PORT: 8000
-    command: python src/math_server/server.py --transport http --host 0.0.0.0 --port 8000 --config config.yaml
+    command: python -m src.builtin.math_server --transport http --host 0.0.0.0 --port 8000 --config config.yaml
     healthcheck:
       <<: *mcp-healthcheck
     restart: unless-stopped
@@ -41,7 +41,7 @@ services:
     environment:
       <<: *mcp-environment
       HEALTHCHECK_PORT: 8001
-    command: python src/stats_server/server.py --transport http --host 0.0.0.0 --port 8001 --config config.yaml
+    command: python -m src.builtin.stats_server --transport http --host 0.0.0.0 --port 8001 --config config.yaml
     healthcheck:
       <<: *mcp-healthcheck
     restart: unless-stopped

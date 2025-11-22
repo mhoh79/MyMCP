@@ -1,117 +1,26 @@
 """
-Main MCP server implementation for mathematical calculations.
-This server provides tools for Fibonacci, prime numbers, number theory,
-sequence generation, cryptographic hashing, unit conversion, date calculations,
-and text processing.
+Mathematical calculation tools and handlers for the Math MCP Server.
+
+This module contains all business logic functions, tool definitions,
+and tool handlers for mathematical operations.
 """
 
-import argparse
-import asyncio
 import base64
 import hashlib
 import logging
-import os
 import re
-import signal
-import sys
-import time
 import urllib.parse
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 # Import dateutil for advanced date operations
 from dateutil.relativedelta import relativedelta
 
-# MCP SDK imports for building the server
-from mcp.server import Server
-from mcp.server.stdio import stdio_server
-from mcp.types import (
-    Tool,
-    TextContent,
-    CallToolResult,
-    INVALID_PARAMS,
-    INTERNAL_ERROR,
-)
+from mcp.types import Tool, TextContent, CallToolResult
 
-# HTTP transport imports
-from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
-import uvicorn
-from sse_starlette.sse import EventSourceResponse
-import json
-
-# Import configuration module
-# Add parent directory to path to import config module
-_parent_dir = Path(__file__).parent.parent
-if str(_parent_dir) not in sys.path:
-    sys.path.insert(0, str(_parent_dir))
-
-from config import load_config, Config
-from middleware import setup_middleware
-
-# Configure logging to stderr (stdout is reserved for MCP protocol messages)
-# Note: Log level will be updated based on config in main()
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    handlers=[logging.StreamHandler()],  # Logs go to stderr by default
-)
+# Setup logger for this module
 logger = logging.getLogger("math-calculator")
-
-# Global configuration instance
-_config: Optional[Config] = None
-
-
-def get_config() -> Config:
-    """Get the global configuration instance."""
-    global _config
-    if _config is None:
-        _config = Config.create_default()
-    return _config
-
-
-def set_config(config: Config) -> None:
-    """Set the global configuration instance."""
-    global _config
-    _config = config
-
-
-class ServerState:
-    """
-    Track server operational metrics for monitoring endpoints.
-    
-    This class maintains server state including:
-    - Server start time for uptime calculation
-    - Total request count
-    - Active SSE connection count
-    - MCP initialization status
-    """
-    
-    def __init__(self):
-        """Initialize server state with default values."""
-        self.start_time = time.time()
-        self.total_requests = 0
-        self.active_connections = 0
-        self.mcp_initialized = True  # MCP is initialized when HTTP server starts
-        
-    def get_uptime_seconds(self) -> float:
-        """Get server uptime in seconds."""
-        return time.time() - self.start_time
-    
-    def increment_requests(self):
-        """Increment total request counter."""
-        self.total_requests += 1
-    
-    def increment_connections(self):
-        """Increment active connection counter."""
-        self.active_connections += 1
-    
-    def decrement_connections(self):
-        """Decrement active connection counter."""
-        if self.active_connections > 0:
-            self.active_connections -= 1
-
 
 def calculate_fibonacci(n: int) -> int:
     """
@@ -2186,731 +2095,6 @@ def encode_decode(text: str, operation: str, format: str) -> str:
         raise ValueError(f"Failed to {operation} text using {format} format: {str(e)}")
 
 
-# ============================================================================
-# MCP Server Implementation
-# ============================================================================
-
-
-# Initialize the MCP server with a descriptive name
-app = Server("math-calculator")
-
-
-@app.list_tools()
-async def list_tools() -> list[Tool]:
-    """
-    Register and list all available tools that this MCP server provides.
-    
-    This function is called by MCP clients to discover what tools are available.
-    Each tool has a name, description, and input schema defined using JSON Schema.
-    
-    Returns:
-        List of Tool objects describing available tools
-    """
-    logger.info("Client requested tool list")
-    
-    return [
-        Tool(
-            name="calculate_fibonacci",
-            description=(
-                "Calculate the nth Fibonacci number or generate a Fibonacci sequence. "
-                "Supports both single value calculation and sequence generation. "
-                "The Fibonacci sequence starts: 0, 1, 1, 2, 3, 5, 8, 13, 21, 34..."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "n": {
-                        "type": "integer",
-                        "description": "The position in the Fibonacci sequence (0-indexed) or count of numbers to generate",
-                        "minimum": 0,
-                        "maximum": 1000,  # Reasonable limit to prevent performance issues
-                    },
-                    "return_sequence": {
-                        "type": "boolean",
-                        "description": "If true, returns the entire sequence up to n. If false, returns only the nth number.",
-                        "default": False,
-                    },
-                },
-                "required": ["n"],
-            },
-        ),
-        Tool(
-            name="is_prime",
-            description=(
-                "Check if a number is prime. Uses optimized trial division algorithm "
-                "that checks divisibility up to the square root of n. "
-                "Returns a boolean result with explanation."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "n": {
-                        "type": "integer",
-                        "description": "The number to check for primality",
-                        "minimum": 2,
-                        "maximum": 1000000,
-                    },
-                },
-                "required": ["n"],
-            },
-        ),
-        Tool(
-            name="generate_primes",
-            description=(
-                "Generate all prime numbers up to a given limit using the Sieve of Eratosthenes algorithm. "
-                "This is an efficient method for finding all primes up to a specified number. "
-                "Returns a list of all prime numbers from 2 to the limit."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "limit": {
-                        "type": "integer",
-                        "description": "The upper bound (inclusive) for prime generation",
-                        "minimum": 2,
-                        "maximum": 10000,
-                    },
-                },
-                "required": ["limit"],
-            },
-        ),
-        Tool(
-            name="nth_prime",
-            description=(
-                "Find the nth prime number (1-indexed). "
-                "For example, the 1st prime is 2, the 5th prime is 11, and the 10th prime is 29. "
-                "Uses efficient prime generation to find the requested prime."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "n": {
-                        "type": "integer",
-                        "description": "The position of the desired prime number (1-indexed)",
-                        "minimum": 1,
-                        "maximum": 10000,
-                    },
-                },
-                "required": ["n"],
-            },
-        ),
-        Tool(
-            name="prime_factorization",
-            description=(
-                "Find the prime factorization of a number with exponents. "
-                "Returns a list of [prime, exponent] pairs. "
-                "For example, 24 = 2³ × 3¹ is returned as [[2, 3], [3, 1]]."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "n": {
-                        "type": "integer",
-                        "description": "The number to factorize",
-                        "minimum": 2,
-                        "maximum": 1000000,
-                    },
-                },
-                "required": ["n"],
-            },
-        ),
-        Tool(
-            name="gcd",
-            description=(
-                "Calculate the greatest common divisor (GCD) of two or more numbers using the Euclidean algorithm. "
-                "The GCD is the largest positive integer that divides all given numbers without a remainder. "
-                "For example, GCD(48, 18) = 6."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "numbers": {
-                        "type": "array",
-                        "description": "Array of integers to find GCD of",
-                        "items": {
-                            "type": "integer"
-                        },
-                        "minItems": 2,
-                        "maxItems": 10,
-                    },
-                },
-                "required": ["numbers"],
-            },
-        ),
-        Tool(
-            name="lcm",
-            description=(
-                "Calculate the least common multiple (LCM) of two or more numbers. "
-                "The LCM is the smallest positive integer divisible by all given numbers. "
-                "Uses the formula LCM(a,b) = (a × b) / GCD(a,b). "
-                "For example, LCM(12, 18) = 36."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "numbers": {
-                        "type": "array",
-                        "description": "Array of integers to find LCM of",
-                        "items": {
-                            "type": "integer"
-                        },
-                        "minItems": 2,
-                        "maxItems": 10,
-                    },
-                },
-                "required": ["numbers"],
-            },
-        ),
-        Tool(
-            name="factorial",
-            description=(
-                "Calculate the factorial of a number (n!). "
-                "The factorial is the product of all positive integers less than or equal to n. "
-                "By definition, 0! = 1. Limited to n ≤ 170 to avoid overflow. "
-                "For example, factorial(5) = 120."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "n": {
-                        "type": "integer",
-                        "description": "The number to calculate factorial of",
-                        "minimum": 0,
-                        "maximum": 170,
-                    },
-                },
-                "required": ["n"],
-            },
-        ),
-        Tool(
-            name="combinations",
-            description=(
-                "Calculate combinations (nCr) - the number of ways to choose r items from n items "
-                "where order does not matter. Also written as 'n choose r' or C(n,r). "
-                "Formula: C(n,r) = n! / (r! × (n-r)!). "
-                "For example, C(5,2) = 10."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "n": {
-                        "type": "integer",
-                        "description": "Total number of items",
-                        "minimum": 0,
-                        "maximum": 1000,
-                    },
-                    "r": {
-                        "type": "integer",
-                        "description": "Number of items to choose (must be ≤ n)",
-                        "minimum": 0,
-                    },
-                },
-                "required": ["n", "r"],
-            },
-        ),
-        Tool(
-            name="permutations",
-            description=(
-                "Calculate permutations (nPr) - the number of ordered ways to choose r items from n items "
-                "where order matters. Also written as 'n permute r' or P(n,r). "
-                "Formula: P(n,r) = n! / (n-r)!. "
-                "For example, P(5,2) = 20."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "n": {
-                        "type": "integer",
-                        "description": "Total number of items",
-                        "minimum": 0,
-                        "maximum": 1000,
-                    },
-                    "r": {
-                        "type": "integer",
-                        "description": "Number of items to arrange (must be ≤ n)",
-                        "minimum": 0,
-                    },
-                },
-                "required": ["n", "r"],
-            },
-        ),
-        Tool(
-            name="pascal_triangle",
-            description=(
-                "Generate Pascal's triangle up to n rows. "
-                "Each number in the triangle is the sum of the two numbers directly above it. "
-                "The triangle has applications in combinatorics, probability, and algebra. "
-                "Uses memoization for efficient repeated calculations."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "rows": {
-                        "type": "integer",
-                        "description": "Number of rows to generate in Pascal's triangle",
-                        "minimum": 1,
-                        "maximum": 30,
-                    },
-                },
-                "required": ["rows"],
-            },
-        ),
-        Tool(
-            name="triangular_numbers",
-            description=(
-                "Calculate triangular numbers - numbers that can form equilateral triangles. "
-                "Can either calculate the nth triangular number or generate a sequence. "
-                "Formula: T(n) = n × (n + 1) / 2. "
-                "Examples: T(5) = 15, sequence: [1, 3, 6, 10, 15]"
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "n": {
-                        "type": "integer",
-                        "description": "Position of the triangular number to calculate (1-1000). Mutually exclusive with 'limit'.",
-                        "minimum": 1,
-                        "maximum": 1000,
-                    },
-                    "limit": {
-                        "type": "integer",
-                        "description": "Generate sequence of first 'limit' triangular numbers (1-1000). Mutually exclusive with 'n'.",
-                        "minimum": 1,
-                        "maximum": 1000,
-                    },
-                },
-            },
-        ),
-        Tool(
-            name="perfect_numbers",
-            description=(
-                "Find perfect numbers up to a given limit. "
-                "A perfect number equals the sum of its proper divisors. "
-                "Examples: 6 (1+2+3=6), 28 (1+2+4+7+14=28). "
-                "Perfect numbers are extremely rare - only 4 exist below 10000."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "limit": {
-                        "type": "integer",
-                        "description": "Upper bound for searching perfect numbers",
-                        "minimum": 1,
-                        "maximum": 10000,
-                    },
-                },
-                "required": ["limit"],
-            },
-        ),
-        Tool(
-            name="collatz_sequence",
-            description=(
-                "Generate the Collatz sequence (3n+1 problem) for a starting number. "
-                "Rules: If even, divide by 2; if odd, multiply by 3 and add 1. "
-                "The sequence continues until reaching 1. "
-                "Returns the complete sequence, step count, and maximum value reached. "
-                "Example: 13 → [13, 40, 20, 10, 5, 16, 8, 4, 2, 1] (9 steps)"
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "n": {
-                        "type": "integer",
-                        "description": "Starting number for the Collatz sequence",
-                        "minimum": 1,
-                        "maximum": 100000,
-                    },
-                },
-                "required": ["n"],
-            },
-        ),
-        Tool(
-            name="generate_hash",
-            description=(
-                "Generate cryptographic hash of text or data using various algorithms. "
-                "Supports MD5, SHA-1, SHA-256, SHA-512, and BLAKE2b with hex or base64 output. "
-                "Includes security notes and recommendations for each algorithm. "
-                "WARNING: MD5 and SHA-1 are not cryptographically secure - use SHA-256+ for security."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "data": {
-                        "type": "string",
-                        "description": "Input text or data to hash (max 1MB)",
-                    },
-                    "algorithm": {
-                        "type": "string",
-                        "description": "Hash algorithm to use",
-                        "enum": ["md5", "sha1", "sha256", "sha512", "blake2b"],
-                    },
-                    "output_format": {
-                        "type": "string",
-                        "description": "Output format for the hash (default: hex)",
-                        "enum": ["hex", "base64"],
-                        "default": "hex",
-                    },
-                },
-                "required": ["data", "algorithm"],
-            },
-        ),
-        Tool(
-            name="unit_convert",
-            description=(
-                "Convert between different units of measurement across multiple categories. "
-                "Supports: Length (mm, cm, m, km, in, ft, yd, mi), "
-                "Weight (mg, g, kg, t, oz, lb, ton), "
-                "Temperature (C, F, K with formulas), "
-                "Volume (ml, l, m3, fl oz, cup, pt, qt, gal), "
-                "Time (ms, s, min, h, d, week, year), "
-                "Digital Storage (bit, B, KB, MB, GB, TB using binary 1024), "
-                "Speed (m/s, km/h, mph). "
-                "Uses precise conversion factors and handles both abbreviated and full unit names (case-insensitive)."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "value": {
-                        "type": "number",
-                        "description": "The numeric value to convert",
-                    },
-                    "from_unit": {
-                        "type": "string",
-                        "description": "The source unit (e.g., 'km', 'kilometer', 'F', 'fahrenheit', 'GB')",
-                    },
-                    "to_unit": {
-                        "type": "string",
-                        "description": "The target unit (e.g., 'mi', 'mile', 'C', 'celsius', 'MB')",
-                    },
-                },
-                "required": ["value", "from_unit", "to_unit"],
-            },
-        ),
-        Tool(
-            name="date_diff",
-            description=(
-                "Calculate the difference between two dates in various units. "
-                "Returns the time span in days, weeks, months, years, or all units. "
-                "Properly handles leap years and varying month lengths. "
-                "Example: '2025-01-01' to '2025-12-31' = 364 days."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "date1": {
-                        "type": "string",
-                        "description": "First date in ISO format (YYYY-MM-DD)",
-                    },
-                    "date2": {
-                        "type": "string",
-                        "description": "Second date in ISO format (YYYY-MM-DD)",
-                    },
-                    "unit": {
-                        "type": "string",
-                        "description": "Unit of difference: 'days', 'weeks', 'months', 'years', or 'all' (default)",
-                        "enum": ["days", "weeks", "months", "years", "all"],
-                        "default": "all",
-                    },
-                },
-                "required": ["date1", "date2"],
-            },
-        ),
-        Tool(
-            name="date_add",
-            description=(
-                "Add or subtract time from a date. "
-                "Properly handles month-end dates, leap years, and negative amounts. "
-                "Example: '2025-01-15' + 30 days = '2025-02-14'."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "date": {
-                        "type": "string",
-                        "description": "Starting date in ISO format (YYYY-MM-DD)",
-                    },
-                    "amount": {
-                        "type": "integer",
-                        "description": "Amount to add (can be negative to subtract)",
-                    },
-                    "unit": {
-                        "type": "string",
-                        "description": "Time unit: 'days', 'weeks', 'months', or 'years'",
-                        "enum": ["days", "weeks", "months", "years"],
-                    },
-                },
-                "required": ["date", "amount", "unit"],
-            },
-        ),
-        Tool(
-            name="business_days",
-            description=(
-                "Calculate business days between two dates, excluding weekends (Saturday and Sunday). "
-                "Optionally exclude custom holidays. "
-                "Business days are Monday through Friday only. "
-                "Example: Jan 6-10, 2025 (Mon-Fri) = 5 business days."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "start_date": {
-                        "type": "string",
-                        "description": "Start date in ISO format (YYYY-MM-DD)",
-                    },
-                    "end_date": {
-                        "type": "string",
-                        "description": "End date in ISO format (YYYY-MM-DD)",
-                    },
-                    "exclude_holidays": {
-                        "type": "array",
-                        "description": "Optional array of holiday dates in ISO format to exclude",
-                        "items": {
-                            "type": "string",
-                        },
-                        "default": [],
-                    },
-                },
-                "required": ["start_date", "end_date"],
-            },
-        ),
-        Tool(
-            name="age_calculator",
-            description=(
-                "Calculate age from birthdate with precise years, months, and days. "
-                "Can calculate age as of any reference date (defaults to today). "
-                "Handles leap years correctly. "
-                "Example: Born 1990-05-15 → '35 years, 6 months, 4 days old'."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "birthdate": {
-                        "type": "string",
-                        "description": "Birth date in ISO format (YYYY-MM-DD)",
-                    },
-                    "reference_date": {
-                        "type": "string",
-                        "description": "Optional reference date for age calculation (default: today)",
-                    },
-                },
-                "required": ["birthdate"],
-            },
-        ),
-        Tool(
-            name="day_of_week",
-            description=(
-                "Determine the day of week and additional calendar information for any date. "
-                "Returns day name, week number, day of year, and whether it's a weekend. "
-                "Example: '2025-11-19' → 'Wednesday, Week 47, Day 323'."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "date": {
-                        "type": "string",
-                        "description": "Date in ISO format (YYYY-MM-DD)",
-                    },
-                },
-                "required": ["date"],
-            },
-        ),
-        Tool(
-            name="text_stats",
-            description=(
-                "Calculate comprehensive text statistics including character count (with/without spaces), "
-                "word count, sentence count, paragraph count, average word length, average sentence length, "
-                "and reading time estimate. Handles Unicode text properly. Maximum text size: 100KB."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "text": {
-                        "type": "string",
-                        "description": "Text to analyze (up to 100KB)",
-                    },
-                },
-                "required": ["text"],
-            },
-        ),
-        Tool(
-            name="word_frequency",
-            description=(
-                "Analyze word frequency in text and return the most common words with their counts. "
-                "Performs case-insensitive analysis and removes punctuation. Optionally filters out "
-                "common English words (the, a, an, etc.). Returns list of [word, count] pairs sorted by frequency."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "text": {
-                        "type": "string",
-                        "description": "Text to analyze for word frequency",
-                    },
-                    "top_n": {
-                        "type": "integer",
-                        "description": "Number of most frequent words to return",
-                        "default": 10,
-                        "minimum": 1,
-                    },
-                    "skip_common": {
-                        "type": "boolean",
-                        "description": "Skip common English words (the, a, is, etc.)",
-                        "default": False,
-                    },
-                },
-                "required": ["text"],
-            },
-        ),
-        Tool(
-            name="text_transform",
-            description=(
-                "Transform text using various operations: uppercase, lowercase, titlecase, camelcase, "
-                "snakecase, reverse (reverse characters), words_reverse (reverse word order), "
-                "remove_spaces, remove_punctuation. Example: 'Hello World' → 'helloWorld' (camelcase)."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "text": {
-                        "type": "string",
-                        "description": "Text to transform",
-                    },
-                    "operation": {
-                        "type": "string",
-                        "description": "Transformation operation",
-                        "enum": [
-                            "uppercase", "lowercase", "titlecase", "camelcase", "snakecase",
-                            "reverse", "words_reverse", "remove_spaces", "remove_punctuation"
-                        ],
-                    },
-                },
-                "required": ["text", "operation"],
-            },
-        ),
-        Tool(
-            name="encode_decode",
-            description=(
-                "Encode or decode text using Base64, Hexadecimal, or URL encoding formats. "
-                "Supports both encoding (text → encoded) and decoding (encoded → text). "
-                "Example: 'Hello World' → 'SGVsbG8gV29ybGQ=' (base64 encode)."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "text": {
-                        "type": "string",
-                        "description": "Text to encode or decode",
-                    },
-                    "operation": {
-                        "type": "string",
-                        "description": "Operation to perform",
-                        "enum": ["encode", "decode"],
-                    },
-                    "format": {
-                        "type": "string",
-                        "description": "Encoding format to use",
-                        "enum": ["base64", "hex", "url"],
-                    },
-                },
-                "required": ["text", "operation", "format"],
-            },
-        ),
-    ]
-
-
-@app.call_tool()
-async def call_tool(name: str, arguments: Any) -> CallToolResult:
-    """
-    Handle tool execution requests from MCP clients.
-    
-    This function is called when an MCP client (like Claude) wants to use one of
-    the tools that this server provides. It validates inputs, executes the tool,
-    and returns results in the proper MCP format.
-    
-    Args:
-        name: The name of the tool to execute
-        arguments: Dictionary containing the tool's input parameters
-        
-    Returns:
-        CallToolResult containing the tool's output or error information
-    """
-    logger.info(f"Tool call requested: {name} with arguments: {arguments}")
-    
-    try:
-        # Route to appropriate tool handler
-        if name == "calculate_fibonacci":
-            return await handle_fibonacci(arguments)
-        elif name == "is_prime":
-            return await handle_is_prime(arguments)
-        elif name == "generate_primes":
-            return await handle_generate_primes(arguments)
-        elif name == "nth_prime":
-            return await handle_nth_prime(arguments)
-        elif name == "prime_factorization":
-            return await handle_prime_factorization(arguments)
-        elif name == "gcd":
-            return await handle_gcd(arguments)
-        elif name == "lcm":
-            return await handle_lcm(arguments)
-        elif name == "factorial":
-            return await handle_factorial(arguments)
-        elif name == "combinations":
-            return await handle_combinations(arguments)
-        elif name == "permutations":
-            return await handle_permutations(arguments)
-        elif name == "pascal_triangle":
-            return await handle_pascal_triangle(arguments)
-        elif name == "triangular_numbers":
-            return await handle_triangular_numbers(arguments)
-        elif name == "perfect_numbers":
-            return await handle_perfect_numbers(arguments)
-        elif name == "collatz_sequence":
-            return await handle_collatz_sequence(arguments)
-        elif name == "generate_hash":
-            return await handle_generate_hash(arguments)
-        elif name == "unit_convert":
-            return await handle_unit_convert(arguments)
-        elif name == "date_diff":
-            return await handle_date_diff(arguments)
-        elif name == "date_add":
-            return await handle_date_add(arguments)
-        elif name == "business_days":
-            return await handle_business_days(arguments)
-        elif name == "age_calculator":
-            return await handle_age_calculator(arguments)
-        elif name == "day_of_week":
-            return await handle_day_of_week(arguments)
-        elif name == "text_stats":
-            return await handle_text_stats(arguments)
-        elif name == "word_frequency":
-            return await handle_word_frequency(arguments)
-        elif name == "text_transform":
-            return await handle_text_transform(arguments)
-        elif name == "encode_decode":
-            return await handle_encode_decode(arguments)
-        else:
-            logger.error(f"Unknown tool requested: {name}")
-            return CallToolResult(
-                content=[TextContent(type="text", text=f"Unknown tool: {name}")],
-                isError=True,
-            )
-        
-    except ValueError as e:
-        # Handle calculation errors (e.g., invalid inputs)
-        logger.error(f"Calculation error: {e}")
-        return CallToolResult(
-            content=[TextContent(type="text", text=f"Calculation error: {str(e)}")],
-            isError=True,
-        )
-    except Exception as e:
-        # Handle unexpected errors
-        logger.exception(f"Unexpected error during tool execution: {e}")
-        return CallToolResult(
-            content=[TextContent(type="text", text=f"Internal error: {str(e)}")],
-            isError=True,
-        )
-
-
 async def handle_fibonacci(arguments: Any) -> CallToolResult:
     """Handle calculate_fibonacci tool calls."""
     # Extract and validate parameters
@@ -4847,454 +4031,615 @@ async def handle_encode_decode(arguments: Any) -> CallToolResult:
         )
 
 
-async def run_http_server(host: str = "0.0.0.0", port: int = 8000, config_path: Optional[str] = None, dev_mode: bool = False):
-    """
-    Run the server using HTTP/SSE transport.
-    
-    This function starts the server using FastAPI with:
-    - SSE endpoint at /sse for server-to-client messages
-    - POST endpoint at /messages for client-to-server JSON-RPC requests
-    
-    This allows remote access from tools like GitHub Codespaces while
-    maintaining the MCP protocol over HTTP.
-    
-    Args:
-        host: Host to bind to (default: 0.0.0.0)
-        port: Port to bind to (default: 8000)
-        config_path: Optional path to configuration file
-        dev_mode: Enable development mode with hot-reload (default: False)
-    """
-    # Load configuration
-    try:
-        config = load_config(config_path)
-        set_config(config)
-        
-        # Update logging level based on configuration
-        log_level = getattr(logging, config.logging.level)
-        logger.setLevel(log_level)
-        logging.getLogger().setLevel(log_level)
-        
-        logger.info("Starting Math Calculator MCP server (HTTP mode)")
-        logger.info(f"Configuration loaded from: {config_path or 'defaults'}")
-        logger.info(f"Log level: {config.logging.level}")
-        logger.info(f"Server will listen on {host}:{port}")
-        
-    except (FileNotFoundError, ValueError) as e:
-        logger.error(f"Configuration error: {e}")
-        logger.error("Server startup failed due to configuration errors")
-        sys.exit(1)
-    
-    # Create FastAPI app
-    fastapi_app = FastAPI(title="Math Calculator MCP Server", version="1.0.0")
-    
-    # Setup middleware (CORS, authentication, rate limiting, logging)
-    setup_middleware(fastapi_app, config)
-    
-    # Initialize server state for monitoring
-    server_state = ServerState()
-    
-    # Store for SSE connections
-    sse_connections = []
-    
-    @fastapi_app.get("/sse")
-    async def sse_endpoint(request: Request):
-        """
-        Server-Sent Events endpoint for streaming server-to-client messages.
-        This endpoint streams MCP protocol messages from the server to the client.
-        """
-        async def event_generator():
-            try:
-                # Register this connection
-                connection_id = id(request)
-                sse_connections.append(connection_id)
-                server_state.increment_connections()
-                logger.info(f"New SSE connection established: {connection_id}")
-                
-                # Send initial connection message
-                yield {
-                    "event": "connected",
-                    "data": json.dumps({"status": "connected", "server": "math-calculator"})
-                }
-                
-                # Keep the connection alive and send events
-                while True:
-                    # Check if client disconnected
-                    if await request.is_disconnected():
-                        logger.info(f"SSE connection disconnected: {connection_id}")
-                        break
-                    
-                    # Send keepalive ping every 30 seconds
-                    yield {
-                        "event": "ping",
-                        "data": json.dumps({"timestamp": datetime.now().isoformat()})
-                    }
-                    
-                    await asyncio.sleep(30)
-                    
-            except asyncio.CancelledError:
-                logger.info(f"SSE connection cancelled: {connection_id}")
-            except Exception as e:
-                logger.error(f"Error in SSE endpoint: {e}", exc_info=True)
-            finally:
-                if connection_id in sse_connections:
-                    sse_connections.remove(connection_id)
-                server_state.decrement_connections()
-                logger.info(f"SSE connection closed: {connection_id}")
-        
-        return EventSourceResponse(event_generator())
-    
-    @fastapi_app.post("/messages")
-    async def messages_endpoint(request: Request):
-        """
-        JSON-RPC 2.0 endpoint for client-to-server requests.
-        Handles MCP protocol messages sent from the client.
-        """
-        # Track request
-        server_state.increment_requests()
-        
-        try:
-            # Parse JSON-RPC request
-            body = await request.json()
-            logger.debug(f"Received JSON-RPC request: {body}")
-            
-            # Validate JSON-RPC 2.0 format
-            if "jsonrpc" not in body or body["jsonrpc"] != "2.0":
-                return {
-                    "jsonrpc": "2.0",
-                    "error": {
-                        "code": -32600,
-                        "message": "Invalid Request: missing or invalid jsonrpc version"
+# ============================================================================
+# Tool Definitions
+# ============================================================================
+
+MATH_TOOLS = [
+        Tool(
+            name="calculate_fibonacci",
+            description=(
+                "Calculate the nth Fibonacci number or generate a Fibonacci sequence. "
+                "Supports both single value calculation and sequence generation. "
+                "The Fibonacci sequence starts: 0, 1, 1, 2, 3, 5, 8, 13, 21, 34..."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "n": {
+                        "type": "integer",
+                        "description": "The position in the Fibonacci sequence (0-indexed) or count of numbers to generate",
+                        "minimum": 0,
+                        "maximum": 1000,  # Reasonable limit to prevent performance issues
                     },
-                    "id": body.get("id")
-                }
-            
-            method = body.get("method")
-            params = body.get("params", {})
-            request_id = body.get("id")
-            
-            # Handle different MCP methods
-            if method == "initialize":
-                result = {
-                    "protocolVersion": "2024-11-05",
-                    "capabilities": {
-                        "tools": {}
+                    "return_sequence": {
+                        "type": "boolean",
+                        "description": "If true, returns the entire sequence up to n. If false, returns only the nth number.",
+                        "default": False,
                     },
-                    "serverInfo": {
-                        "name": "math-calculator",
-                        "version": "1.0.0"
-                    }
-                }
-            elif method == "tools/list":
-                # Return list of available tools
-                tools_list = await list_tools()
-                result = {"tools": [tool.model_dump() for tool in tools_list]}
-            elif method == "tools/call":
-                # Call a specific tool
-                tool_name = params.get("name")
-                tool_arguments = params.get("arguments", {})
-                
-                # Execute the tool
-                tool_result = await call_tool(tool_name, tool_arguments)
-                result = {
-                    "content": [content.model_dump() for content in tool_result.content],
-                    "isError": tool_result.isError
-                }
-            else:
-                return {
-                    "jsonrpc": "2.0",
-                    "error": {
-                        "code": -32601,
-                        "message": f"Method not found: {method}"
-                    },
-                    "id": request_id
-                }
-            
-            # Return successful response
-            return {
-                "jsonrpc": "2.0",
-                "result": result,
-                "id": request_id
-            }
-            
-        except json.JSONDecodeError:
-            return {
-                "jsonrpc": "2.0",
-                "error": {
-                    "code": -32700,
-                    "message": "Parse error: invalid JSON"
                 },
-                "id": None
-            }
-        except Exception as e:
-            logger.error(f"Error handling message: {e}", exc_info=True)
-            return {
-                "jsonrpc": "2.0",
-                "error": {
-                    "code": -32603,
-                    "message": f"Internal error: {str(e)}"
+                "required": ["n"],
+            },
+        ),
+        Tool(
+            name="is_prime",
+            description=(
+                "Check if a number is prime. Uses optimized trial division algorithm "
+                "that checks divisibility up to the square root of n. "
+                "Returns a boolean result with explanation."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "n": {
+                        "type": "integer",
+                        "description": "The number to check for primality",
+                        "minimum": 2,
+                        "maximum": 1000000,
+                    },
                 },
-                "id": body.get("id") if isinstance(body, dict) else None
-            }
-    
-    @fastapi_app.get("/health")
-    async def health_check():
-        """
-        Health check endpoint - basic liveness check.
-        Always returns 200 OK with server status and uptime.
-        """
-        return {
-            "status": "ok",
-            "server": "math-server",
-            "uptime_seconds": round(server_state.get_uptime_seconds(), 2),
-            "timestamp": datetime.now().isoformat() + "Z"
-        }
-    
-    @fastapi_app.get("/ready")
-    async def readiness_check():
-        """
-        Readiness check endpoint - indicates if server is ready to accept requests.
-        Returns 200 if ready, 503 if not ready.
-        """
-        if server_state.mcp_initialized:
-            # Get tools count
-            tools_list = await list_tools()
-            return {
-                "status": "ready",
-                "mcp_initialized": True,
-                "tools_count": len(tools_list)
-            }
-        else:
-            return JSONResponse(
-                status_code=503,
-                content={
-                    "status": "not_ready",
-                    "mcp_initialized": False,
-                    "tools_count": 0
-                }
-            )
-    
-    @fastapi_app.get("/metrics")
-    async def metrics_endpoint():
-        """
-        Metrics endpoint - provides operational statistics.
-        Returns request counts, active connections, tools available, and uptime.
-        """
-        uptime_seconds = server_state.get_uptime_seconds()
-        tools_list = await list_tools()
-        
-        # Calculate requests per minute
-        uptime_minutes = uptime_seconds / 60.0
-        requests_per_minute = (
-            server_state.total_requests / uptime_minutes if uptime_minutes > 0 else 0.0
-        )
-        
-        return {
-            "total_requests": server_state.total_requests,
-            "active_connections": server_state.active_connections,
-            "tools_available": len(tools_list),
-            "uptime_seconds": round(uptime_seconds, 2),
-            "requests_per_minute": round(requests_per_minute, 2)
-        }
-    
-    # Graceful shutdown handler
-    shutdown_event = asyncio.Event()
-    
-    def signal_handler(signum, frame):
-        """Handle shutdown signals."""
-        sig_name = signal.Signals(signum).name
-        logger.info(f"Received signal {sig_name}, initiating graceful shutdown...")
-        shutdown_event.set()
-    
-    # Register signal handlers
-    signal.signal(signal.SIGTERM, signal_handler)
-    signal.signal(signal.SIGINT, signal_handler)
-    
-    # Set up uvicorn configuration
-    if dev_mode:
-        # Development mode: Enable debug logging
-        logger.info("🔥 Development mode enabled - debug logging active")
-        logger.warning("Dev mode is for development only - do not use in production!")
-        logger.info("For hot-reload, use VS Code debug configs")
-        
-        # Set up logging for debug
-        logging.getLogger().setLevel(logging.DEBUG)
-        logger.setLevel(logging.DEBUG)
-        log_level = "debug"
-    else:
-        log_level = "info"
-    
-    config_uvicorn = uvicorn.Config(
-        fastapi_app,
-        host=host,
-        port=port,
-        log_level=log_level
-    )
-    server = uvicorn.Server(config_uvicorn)
-    
-    # Create server task
-    server_task = asyncio.create_task(server.serve())
-    
-    try:
-        # Wait for either server completion or shutdown signal
-        _, _ = await asyncio.wait(
-            [server_task, asyncio.create_task(shutdown_event.wait())],
-            return_when=asyncio.FIRST_COMPLETED
-        )
-        
-        # If shutdown was signaled, perform graceful cleanup
-        if shutdown_event.is_set():
-            logger.info("Shutting down server...")
-            logger.info(f"Closing {len(sse_connections)} active SSE connections...")
-            
-            # Signal server to shutdown
-            server.should_exit = True
-            
-            # Wait for server to shutdown (max 30 seconds)
-            try:
-                await asyncio.wait_for(server_task, timeout=30.0)
-            except asyncio.TimeoutError:
-                logger.warning("Server shutdown timed out after 30 seconds")
-            
-            logger.info("All connections closed")
-            logger.info("Shutdown complete")
-        
-    except Exception as e:
-        logger.error(f"Server error: {e}", exc_info=True)
-        sys.exit(1)
-
-
-async def run_stdio_server(config_path: Optional[str] = None):
-    """
-    Run the server using stdio transport.
-    
-    This function starts the server using stdio transport, which means:
-    - The server reads MCP protocol messages from stdin
-    - The server writes MCP protocol messages to stdout
-    - All logging and debugging output goes to stderr
-    
-    This is the standard transport for MCP servers that will be launched
-    by client applications like Claude Desktop.
-    
-    Args:
-        config_path: Optional path to configuration file
-    """
-    # Load configuration
-    try:
-        config = load_config(config_path)
-        set_config(config)
-        
-        # Update logging level based on configuration
-        log_level = getattr(logging, config.logging.level)
-        logger.setLevel(log_level)
-        logging.getLogger().setLevel(log_level)
-        
-        logger.info("Starting Math Calculator MCP server")
-        logger.info(f"Configuration loaded from: {config_path or 'defaults'}")
-        logger.info(f"Log level: {config.logging.level}")
-        
-        # Log configuration (excluding sensitive data)
-        if config_path:
-            logger.debug(f"Math server: {config.server.math.host}:{config.server.math.port}")
-            logger.debug(f"Authentication: {'enabled' if config.authentication.enabled else 'disabled'}")
-            logger.debug(f"Rate limiting: {'enabled' if config.rate_limiting.enabled else 'disabled'}")
-            if config.rate_limiting.enabled:
-                logger.debug(f"Rate limit: {config.rate_limiting.requests_per_minute} req/min")
-        
-    except (FileNotFoundError, ValueError) as e:
-        logger.error(f"Configuration error: {e}")
-        logger.error("Server startup failed due to configuration errors")
-        sys.exit(1)
-    
-    # Run the server using stdio transport
-    # This will block until the server receives a shutdown signal
-    try:
-        async with stdio_server() as (read_stream, write_stream):
-            logger.info("Server started, waiting for requests...")
-            await app.run(
-                read_stream,
-                write_stream,
-                app.create_initialization_options()
-            )
-    except Exception as e:
-        logger.error(f"Server error: {e}", exc_info=True)
-        sys.exit(1)
-    
-    logger.info("Server shut down successfully")
-
-
-# Entry point when running as a script
-if __name__ == "__main__":
-    # Parse command-line arguments
-    parser = argparse.ArgumentParser(
-        description="Math Calculator MCP Server",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  # Run with default configuration (stdio mode)
-  python server.py
-  
-  # Run in HTTP mode
-  python server.py --transport http --host 0.0.0.0 --port 8000
-  
-  # Run in HTTP mode with hot-reload (development)
-  python server.py --transport http --host 0.0.0.0 --port 8000 --dev
-  
-  # Run with custom configuration file
-  python server.py --config /path/to/config.yaml
-  
-  # Run in HTTP mode with custom configuration
-  python server.py --transport http --host 127.0.0.1 --port 8080 --config config.yaml
-  
-  # Run with environment variable overrides
-  MCP_LOG_LEVEL=DEBUG python server.py --config config.yaml
-  
-Environment Variables:
-  MCP_MATH_HOST           Override math server host
-  MCP_MATH_PORT           Override math server port
-  MCP_AUTH_ENABLED        Enable/disable authentication (true/false)
-  MCP_API_KEY             Set API key
-  MCP_RATE_LIMIT_ENABLED  Enable/disable rate limiting (true/false)
-  MCP_RATE_LIMIT_RPM      Set requests per minute
-  MCP_LOG_LEVEL           Set logging level (DEBUG/INFO/WARNING/ERROR/CRITICAL)
-        """
-    )
-    parser.add_argument(
-        "--config",
-        type=str,
-        default=None,
-        help="Path to YAML configuration file (optional)"
-    )
-    parser.add_argument(
-        "--transport",
-        type=str,
-        choices=["stdio", "http"],
-        default="stdio",
-        help="Transport mode: stdio (default, for Claude Desktop) or http (for remote access)"
-    )
-    parser.add_argument(
-        "--host",
-        type=str,
-        default="0.0.0.0",
-        help="Host to bind to in HTTP mode (default: 0.0.0.0)"
-    )
-    parser.add_argument(
-        "--port",
-        type=int,
-        default=8000,
-        help="Port to bind to in HTTP mode (default: 8000)"
-    )
-    parser.add_argument(
-        "--dev",
-        action="store_true",
-        help="Enable development mode with hot-reload (HTTP mode only)"
-    )
-    
-    args = parser.parse_args()
-    
-    # Run the appropriate server mode
-    if args.transport == "http":
-        asyncio.run(run_http_server(args.host, args.port, args.config, args.dev))
-    else:
-        if args.dev:
-            logger.warning("--dev flag is only supported in HTTP mode, ignoring")
-        asyncio.run(run_stdio_server(args.config))
+                "required": ["n"],
+            },
+        ),
+        Tool(
+            name="generate_primes",
+            description=(
+                "Generate all prime numbers up to a given limit using the Sieve of Eratosthenes algorithm. "
+                "This is an efficient method for finding all primes up to a specified number. "
+                "Returns a list of all prime numbers from 2 to the limit."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "limit": {
+                        "type": "integer",
+                        "description": "The upper bound (inclusive) for prime generation",
+                        "minimum": 2,
+                        "maximum": 10000,
+                    },
+                },
+                "required": ["limit"],
+            },
+        ),
+        Tool(
+            name="nth_prime",
+            description=(
+                "Find the nth prime number (1-indexed). "
+                "For example, the 1st prime is 2, the 5th prime is 11, and the 10th prime is 29. "
+                "Uses efficient prime generation to find the requested prime."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "n": {
+                        "type": "integer",
+                        "description": "The position of the desired prime number (1-indexed)",
+                        "minimum": 1,
+                        "maximum": 10000,
+                    },
+                },
+                "required": ["n"],
+            },
+        ),
+        Tool(
+            name="prime_factorization",
+            description=(
+                "Find the prime factorization of a number with exponents. "
+                "Returns a list of [prime, exponent] pairs. "
+                "For example, 24 = 2³ × 3¹ is returned as [[2, 3], [3, 1]]."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "n": {
+                        "type": "integer",
+                        "description": "The number to factorize",
+                        "minimum": 2,
+                        "maximum": 1000000,
+                    },
+                },
+                "required": ["n"],
+            },
+        ),
+        Tool(
+            name="gcd",
+            description=(
+                "Calculate the greatest common divisor (GCD) of two or more numbers using the Euclidean algorithm. "
+                "The GCD is the largest positive integer that divides all given numbers without a remainder. "
+                "For example, GCD(48, 18) = 6."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "numbers": {
+                        "type": "array",
+                        "description": "Array of integers to find GCD of",
+                        "items": {
+                            "type": "integer"
+                        },
+                        "minItems": 2,
+                        "maxItems": 10,
+                    },
+                },
+                "required": ["numbers"],
+            },
+        ),
+        Tool(
+            name="lcm",
+            description=(
+                "Calculate the least common multiple (LCM) of two or more numbers. "
+                "The LCM is the smallest positive integer divisible by all given numbers. "
+                "Uses the formula LCM(a,b) = (a × b) / GCD(a,b). "
+                "For example, LCM(12, 18) = 36."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "numbers": {
+                        "type": "array",
+                        "description": "Array of integers to find LCM of",
+                        "items": {
+                            "type": "integer"
+                        },
+                        "minItems": 2,
+                        "maxItems": 10,
+                    },
+                },
+                "required": ["numbers"],
+            },
+        ),
+        Tool(
+            name="factorial",
+            description=(
+                "Calculate the factorial of a number (n!). "
+                "The factorial is the product of all positive integers less than or equal to n. "
+                "By definition, 0! = 1. Limited to n ≤ 170 to avoid overflow. "
+                "For example, factorial(5) = 120."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "n": {
+                        "type": "integer",
+                        "description": "The number to calculate factorial of",
+                        "minimum": 0,
+                        "maximum": 170,
+                    },
+                },
+                "required": ["n"],
+            },
+        ),
+        Tool(
+            name="combinations",
+            description=(
+                "Calculate combinations (nCr) - the number of ways to choose r items from n items "
+                "where order does not matter. Also written as 'n choose r' or C(n,r). "
+                "Formula: C(n,r) = n! / (r! × (n-r)!). "
+                "For example, C(5,2) = 10."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "n": {
+                        "type": "integer",
+                        "description": "Total number of items",
+                        "minimum": 0,
+                        "maximum": 1000,
+                    },
+                    "r": {
+                        "type": "integer",
+                        "description": "Number of items to choose (must be ≤ n)",
+                        "minimum": 0,
+                    },
+                },
+                "required": ["n", "r"],
+            },
+        ),
+        Tool(
+            name="permutations",
+            description=(
+                "Calculate permutations (nPr) - the number of ordered ways to choose r items from n items "
+                "where order matters. Also written as 'n permute r' or P(n,r). "
+                "Formula: P(n,r) = n! / (n-r)!. "
+                "For example, P(5,2) = 20."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "n": {
+                        "type": "integer",
+                        "description": "Total number of items",
+                        "minimum": 0,
+                        "maximum": 1000,
+                    },
+                    "r": {
+                        "type": "integer",
+                        "description": "Number of items to arrange (must be ≤ n)",
+                        "minimum": 0,
+                    },
+                },
+                "required": ["n", "r"],
+            },
+        ),
+        Tool(
+            name="pascal_triangle",
+            description=(
+                "Generate Pascal's triangle up to n rows. "
+                "Each number in the triangle is the sum of the two numbers directly above it. "
+                "The triangle has applications in combinatorics, probability, and algebra. "
+                "Uses memoization for efficient repeated calculations."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "rows": {
+                        "type": "integer",
+                        "description": "Number of rows to generate in Pascal's triangle",
+                        "minimum": 1,
+                        "maximum": 30,
+                    },
+                },
+                "required": ["rows"],
+            },
+        ),
+        Tool(
+            name="triangular_numbers",
+            description=(
+                "Calculate triangular numbers - numbers that can form equilateral triangles. "
+                "Can either calculate the nth triangular number or generate a sequence. "
+                "Formula: T(n) = n × (n + 1) / 2. "
+                "Examples: T(5) = 15, sequence: [1, 3, 6, 10, 15]"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "n": {
+                        "type": "integer",
+                        "description": "Position of the triangular number to calculate (1-1000). Mutually exclusive with 'limit'.",
+                        "minimum": 1,
+                        "maximum": 1000,
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Generate sequence of first 'limit' triangular numbers (1-1000). Mutually exclusive with 'n'.",
+                        "minimum": 1,
+                        "maximum": 1000,
+                    },
+                },
+            },
+        ),
+        Tool(
+            name="perfect_numbers",
+            description=(
+                "Find perfect numbers up to a given limit. "
+                "A perfect number equals the sum of its proper divisors. "
+                "Examples: 6 (1+2+3=6), 28 (1+2+4+7+14=28). "
+                "Perfect numbers are extremely rare - only 4 exist below 10000."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "limit": {
+                        "type": "integer",
+                        "description": "Upper bound for searching perfect numbers",
+                        "minimum": 1,
+                        "maximum": 10000,
+                    },
+                },
+                "required": ["limit"],
+            },
+        ),
+        Tool(
+            name="collatz_sequence",
+            description=(
+                "Generate the Collatz sequence (3n+1 problem) for a starting number. "
+                "Rules: If even, divide by 2; if odd, multiply by 3 and add 1. "
+                "The sequence continues until reaching 1. "
+                "Returns the complete sequence, step count, and maximum value reached. "
+                "Example: 13 → [13, 40, 20, 10, 5, 16, 8, 4, 2, 1] (9 steps)"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "n": {
+                        "type": "integer",
+                        "description": "Starting number for the Collatz sequence",
+                        "minimum": 1,
+                        "maximum": 100000,
+                    },
+                },
+                "required": ["n"],
+            },
+        ),
+        Tool(
+            name="generate_hash",
+            description=(
+                "Generate cryptographic hash of text or data using various algorithms. "
+                "Supports MD5, SHA-1, SHA-256, SHA-512, and BLAKE2b with hex or base64 output. "
+                "Includes security notes and recommendations for each algorithm. "
+                "WARNING: MD5 and SHA-1 are not cryptographically secure - use SHA-256+ for security."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "string",
+                        "description": "Input text or data to hash (max 1MB)",
+                    },
+                    "algorithm": {
+                        "type": "string",
+                        "description": "Hash algorithm to use",
+                        "enum": ["md5", "sha1", "sha256", "sha512", "blake2b"],
+                    },
+                    "output_format": {
+                        "type": "string",
+                        "description": "Output format for the hash (default: hex)",
+                        "enum": ["hex", "base64"],
+                        "default": "hex",
+                    },
+                },
+                "required": ["data", "algorithm"],
+            },
+        ),
+        Tool(
+            name="unit_convert",
+            description=(
+                "Convert between different units of measurement across multiple categories. "
+                "Supports: Length (mm, cm, m, km, in, ft, yd, mi), "
+                "Weight (mg, g, kg, t, oz, lb, ton), "
+                "Temperature (C, F, K with formulas), "
+                "Volume (ml, l, m3, fl oz, cup, pt, qt, gal), "
+                "Time (ms, s, min, h, d, week, year), "
+                "Digital Storage (bit, B, KB, MB, GB, TB using binary 1024), "
+                "Speed (m/s, km/h, mph). "
+                "Uses precise conversion factors and handles both abbreviated and full unit names (case-insensitive)."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "value": {
+                        "type": "number",
+                        "description": "The numeric value to convert",
+                    },
+                    "from_unit": {
+                        "type": "string",
+                        "description": "The source unit (e.g., 'km', 'kilometer', 'F', 'fahrenheit', 'GB')",
+                    },
+                    "to_unit": {
+                        "type": "string",
+                        "description": "The target unit (e.g., 'mi', 'mile', 'C', 'celsius', 'MB')",
+                    },
+                },
+                "required": ["value", "from_unit", "to_unit"],
+            },
+        ),
+        Tool(
+            name="date_diff",
+            description=(
+                "Calculate the difference between two dates in various units. "
+                "Returns the time span in days, weeks, months, years, or all units. "
+                "Properly handles leap years and varying month lengths. "
+                "Example: '2025-01-01' to '2025-12-31' = 364 days."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "date1": {
+                        "type": "string",
+                        "description": "First date in ISO format (YYYY-MM-DD)",
+                    },
+                    "date2": {
+                        "type": "string",
+                        "description": "Second date in ISO format (YYYY-MM-DD)",
+                    },
+                    "unit": {
+                        "type": "string",
+                        "description": "Unit of difference: 'days', 'weeks', 'months', 'years', or 'all' (default)",
+                        "enum": ["days", "weeks", "months", "years", "all"],
+                        "default": "all",
+                    },
+                },
+                "required": ["date1", "date2"],
+            },
+        ),
+        Tool(
+            name="date_add",
+            description=(
+                "Add or subtract time from a date. "
+                "Properly handles month-end dates, leap years, and negative amounts. "
+                "Example: '2025-01-15' + 30 days = '2025-02-14'."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "date": {
+                        "type": "string",
+                        "description": "Starting date in ISO format (YYYY-MM-DD)",
+                    },
+                    "amount": {
+                        "type": "integer",
+                        "description": "Amount to add (can be negative to subtract)",
+                    },
+                    "unit": {
+                        "type": "string",
+                        "description": "Time unit: 'days', 'weeks', 'months', or 'years'",
+                        "enum": ["days", "weeks", "months", "years"],
+                    },
+                },
+                "required": ["date", "amount", "unit"],
+            },
+        ),
+        Tool(
+            name="business_days",
+            description=(
+                "Calculate business days between two dates, excluding weekends (Saturday and Sunday). "
+                "Optionally exclude custom holidays. "
+                "Business days are Monday through Friday only. "
+                "Example: Jan 6-10, 2025 (Mon-Fri) = 5 business days."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "start_date": {
+                        "type": "string",
+                        "description": "Start date in ISO format (YYYY-MM-DD)",
+                    },
+                    "end_date": {
+                        "type": "string",
+                        "description": "End date in ISO format (YYYY-MM-DD)",
+                    },
+                    "exclude_holidays": {
+                        "type": "array",
+                        "description": "Optional array of holiday dates in ISO format to exclude",
+                        "items": {
+                            "type": "string",
+                        },
+                        "default": [],
+                    },
+                },
+                "required": ["start_date", "end_date"],
+            },
+        ),
+        Tool(
+            name="age_calculator",
+            description=(
+                "Calculate age from birthdate with precise years, months, and days. "
+                "Can calculate age as of any reference date (defaults to today). "
+                "Handles leap years correctly. "
+                "Example: Born 1990-05-15 → '35 years, 6 months, 4 days old'."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "birthdate": {
+                        "type": "string",
+                        "description": "Birth date in ISO format (YYYY-MM-DD)",
+                    },
+                    "reference_date": {
+                        "type": "string",
+                        "description": "Optional reference date for age calculation (default: today)",
+                    },
+                },
+                "required": ["birthdate"],
+            },
+        ),
+        Tool(
+            name="day_of_week",
+            description=(
+                "Determine the day of week and additional calendar information for any date. "
+                "Returns day name, week number, day of year, and whether it's a weekend. "
+                "Example: '2025-11-19' → 'Wednesday, Week 47, Day 323'."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "date": {
+                        "type": "string",
+                        "description": "Date in ISO format (YYYY-MM-DD)",
+                    },
+                },
+                "required": ["date"],
+            },
+        ),
+        Tool(
+            name="text_stats",
+            description=(
+                "Calculate comprehensive text statistics including character count (with/without spaces), "
+                "word count, sentence count, paragraph count, average word length, average sentence length, "
+                "and reading time estimate. Handles Unicode text properly. Maximum text size: 100KB."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "text": {
+                        "type": "string",
+                        "description": "Text to analyze (up to 100KB)",
+                    },
+                },
+                "required": ["text"],
+            },
+        ),
+        Tool(
+            name="word_frequency",
+            description=(
+                "Analyze word frequency in text and return the most common words with their counts. "
+                "Performs case-insensitive analysis and removes punctuation. Optionally filters out "
+                "common English words (the, a, an, etc.). Returns list of [word, count] pairs sorted by frequency."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "text": {
+                        "type": "string",
+                        "description": "Text to analyze for word frequency",
+                    },
+                    "top_n": {
+                        "type": "integer",
+                        "description": "Number of most frequent words to return",
+                        "default": 10,
+                        "minimum": 1,
+                    },
+                    "skip_common": {
+                        "type": "boolean",
+                        "description": "Skip common English words (the, a, is, etc.)",
+                        "default": False,
+                    },
+                },
+                "required": ["text"],
+            },
+        ),
+        Tool(
+            name="text_transform",
+            description=(
+                "Transform text using various operations: uppercase, lowercase, titlecase, camelcase, "
+                "snakecase, reverse (reverse characters), words_reverse (reverse word order), "
+                "remove_spaces, remove_punctuation. Example: 'Hello World' → 'helloWorld' (camelcase)."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "text": {
+                        "type": "string",
+                        "description": "Text to transform",
+                    },
+                    "operation": {
+                        "type": "string",
+                        "description": "Transformation operation",
+                        "enum": [
+                            "uppercase", "lowercase", "titlecase", "camelcase", "snakecase",
+                            "reverse", "words_reverse", "remove_spaces", "remove_punctuation"
+                        ],
+                    },
+                },
+                "required": ["text", "operation"],
+            },
+        ),
+        Tool(
+            name="encode_decode",
+            description=(
+                "Encode or decode text using Base64, Hexadecimal, or URL encoding formats. "
+                "Supports both encoding (text → encoded) and decoding (encoded → text). "
+                "Example: 'Hello World' → 'SGVsbG8gV29ybGQ=' (base64 encode)."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "text": {
+                        "type": "string",
+                        "description": "Text to encode or decode",
+                    },
+                    "operation": {
+                        "type": "string",
+                        "description": "Operation to perform",
+                        "enum": ["encode", "decode"],
+                    },
+                    "format": {
+                        "type": "string",
+                        "description": "Encoding format to use",
+                        "enum": ["base64", "hex", "url"],
+                    },
+                },
+                "required": ["text", "operation", "format"],
+            },
+        ),
+]

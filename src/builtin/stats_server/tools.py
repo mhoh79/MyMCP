@@ -1,20 +1,13 @@
 """
-Main MCP server implementation for statistical analysis.
-This server exposes tools for descriptive statistics, correlation analysis, 
-percentile calculations, outlier detection, time series analysis, and signal processing.
+Statistical analysis tools and handlers for the Stats MCP Server.
+
+This module contains all business logic functions, tool definitions,
+and tool handlers for statistical operations.
 """
 
-import argparse
-import asyncio
 import logging
 import math
-import os
-import signal
-import sys
-import time
-from datetime import datetime
-from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import numpy as np
 from scipy import signal as scipy_signal
@@ -23,95 +16,10 @@ from scipy import stats as scipy_stats
 from scipy.stats import t as t_dist
 from scipy.stats import chi2
 
-# MCP SDK imports for building the server
-from mcp.server import Server
-from mcp.server.stdio import stdio_server
-from mcp.types import (
-    Tool,
-    TextContent,
-    CallToolResult,
-    INVALID_PARAMS,
-    INTERNAL_ERROR,
-)
+from mcp.types import Tool, TextContent, CallToolResult
 
-# HTTP transport imports
-from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
-import uvicorn
-from sse_starlette.sse import EventSourceResponse
-import json
-
-# Import configuration module
-# Add parent directory to path to import config module
-_parent_dir = Path(__file__).parent.parent
-if str(_parent_dir) not in sys.path:
-    sys.path.insert(0, str(_parent_dir))
-
-from config import load_config, Config
-from middleware import setup_middleware
-
-# Configure logging to stderr (stdout is reserved for MCP protocol messages)
-# Note: Log level will be updated based on config in main()
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    handlers=[logging.StreamHandler()],  # Logs go to stderr by default
-)
+# Setup logger for this module
 logger = logging.getLogger("stats-server")
-
-# Global configuration instance
-_config: Optional[Config] = None
-
-
-def get_config() -> Config:
-    """Get the global configuration instance."""
-    global _config
-    if _config is None:
-        _config = Config.create_default()
-    return _config
-
-
-def set_config(config: Config) -> None:
-    """Set the global configuration instance."""
-    global _config
-    _config = config
-
-
-class ServerState:
-    """
-    Track server operational metrics for monitoring endpoints.
-    
-    This class maintains server state including:
-    - Server start time for uptime calculation
-    - Total request count
-    - Active SSE connection count
-    - MCP initialization status
-    """
-    
-    def __init__(self):
-        """Initialize server state with default values."""
-        self.start_time = time.time()
-        self.total_requests = 0
-        self.active_connections = 0
-        self.mcp_initialized = True  # MCP is initialized when HTTP server starts
-        
-    def get_uptime_seconds(self) -> float:
-        """Get server uptime in seconds."""
-        return time.time() - self.start_time
-    
-    def increment_requests(self):
-        """Increment total request counter."""
-        self.total_requests += 1
-    
-    def increment_connections(self):
-        """Increment active connection counter."""
-        self.active_connections += 1
-    
-    def decrement_connections(self):
-        """Decrement active connection counter."""
-        if self.active_connections > 0:
-            self.active_connections -= 1
-
 
 # Constants for numerical calculations and validation
 NUMERICAL_TOLERANCE = 1e-10  # Tolerance for numerical comparisons and singularity checks
@@ -123,20 +31,13 @@ EULER_MASCHERONI_CONSTANT = 0.5772156649  # Euler-Mascheroni constant for isolat
 EWMA_ALPHA = 0.3  # EWMA smoothing factor - balances responsiveness vs stability
 CUSUM_K_FACTOR = 0.5  # CUSUM allowance factor (fraction of std dev) - lower = more sensitive
 
-# SciPy imports for statistical tests
+# SciPy availability check
 try:
-    from scipy import stats as scipy_stats
     from scipy import linalg
     SCIPY_AVAILABLE = True
 except ImportError:
     SCIPY_AVAILABLE = False
     logger.warning("SciPy not available. Some advanced statistical tests will be unavailable.")
-
-
-# ============================================================================
-# Statistical Analysis Functions
-# ============================================================================
-
 
 def descriptive_stats(data: list[float]) -> dict[str, Any]:
     """
@@ -5545,1234 +5446,6 @@ def ewma_chart(
     }
 
 
-# ============================================================================
-# MCP Server Setup
-# ============================================================================
-
-# Create the MCP server instance
-app = Server("stats-tools")
-
-logger.info("Statistical analysis MCP server initialized")
-
-
-@app.list_tools()
-async def list_tools() -> list[Tool]:
-    """
-    List all available statistical analysis tools.
-    
-    This function is called by MCP clients to discover what tools
-    this server provides. Each tool has a name, description, and
-    input schema that defines its parameters.
-    
-    Returns:
-        List of Tool objects describing the available tools
-    """
-    logger.info("Client requested tool list")
-    
-    return [
-        Tool(
-            name="descriptive_stats",
-            description=(
-                "Calculate comprehensive descriptive statistics for a dataset including "
-                "mean, median, mode, standard deviation, variance, min, max, quartiles, "
-                "and range. Provides a complete statistical summary of numeric data."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "data": {
-                        "type": "array",
-                        "items": {"type": "number"},
-                        "description": "Array of numerical values to analyze (1-10000 items)",
-                        "minItems": 1,
-                        "maxItems": 10000
-                    }
-                },
-                "required": ["data"]
-            }
-        ),
-        Tool(
-            name="correlation",
-            description=(
-                "Calculate Pearson correlation coefficient and covariance between two datasets. "
-                "Returns correlation coefficient (-1 to +1), and interpretation. "
-                "Measures the strength and direction of linear relationship between variables."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "x": {
-                        "type": "array",
-                        "items": {"type": "number"},
-                        "description": "First dataset (2-1000 items)",
-                        "minItems": 2,
-                        "maxItems": 1000
-                    },
-                    "y": {
-                        "type": "array",
-                        "items": {"type": "number"},
-                        "description": "Second dataset (must be same length as x)",
-                        "minItems": 2,
-                        "maxItems": 1000
-                    }
-                },
-                "required": ["x", "y"]
-            }
-        ),
-        Tool(
-            name="percentile",
-            description=(
-                "Calculate the value at a specific percentile in a dataset using linear "
-                "interpolation method. Returns the value below which the given percentage "
-                "of observations fall. Useful for quartiles, median, and percentile analysis."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "data": {
-                        "type": "array",
-                        "items": {"type": "number"},
-                        "description": "Array of numerical values (1-10000 items)",
-                        "minItems": 1,
-                        "maxItems": 10000
-                    },
-                    "percentile": {
-                        "type": "number",
-                        "description": "Percentile to calculate (0-100). Common values: 25 (Q1), 50 (median), 75 (Q3), 90, 95, 99",
-                        "minimum": 0,
-                        "maximum": 100
-                    }
-                },
-                "required": ["data", "percentile"]
-            }
-        ),
-        Tool(
-            name="detect_outliers",
-            description=(
-                "Detect outliers in a dataset using the Interquartile Range (IQR) method "
-                "with configurable threshold multiplier. Returns outlier values, indices, "
-                "and statistical boundaries (Q1, Q3, IQR). Standard threshold is 1.5 for "
-                "typical outliers, 3.0 for extreme outliers."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "data": {
-                        "type": "array",
-                        "items": {"type": "number"},
-                        "description": "Array of numerical values to check for outliers (4-10000 items, minimum 4 needed for quartiles)",
-                        "minItems": 4,
-                        "maxItems": 10000
-                    },
-                    "threshold": {
-                        "type": "number",
-                        "description": "IQR multiplier for outlier detection (0.1-10, default: 1.5 for standard outliers, 3.0 for extreme outliers)",
-                        "minimum": 0.1,
-                        "maximum": 10,
-                        "default": 1.5
-                    }
-                },
-                "required": ["data"]
-            }
-        ),
-        Tool(
-            name="moving_average",
-            description=(
-                "Calculate Simple, Exponential, or Weighted Moving Averages for smoothing process data. "
-                "Use cases: smooth noisy sensor readings, trend visualization, filter high-frequency noise, "
-                "identify underlying process trends in industrial automation and SCADA systems."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "data": {
-                        "type": "array",
-                        "items": {"type": "number"},
-                        "description": "Time series data (e.g., hourly temperature readings)",
-                        "minItems": 2
-                    },
-                    "window_size": {
-                        "type": "integer",
-                        "description": "Number of periods for moving average",
-                        "minimum": 2,
-                        "maximum": 1000
-                    },
-                    "ma_type": {
-                        "type": "string",
-                        "enum": ["simple", "exponential", "weighted"],
-                        "default": "simple",
-                        "description": "Type of moving average"
-                    },
-                    "alpha": {
-                        "type": "number",
-                        "description": "Smoothing factor for EMA (0-1), default 2/(window_size+1)",
-                        "minimum": 0,
-                        "maximum": 1
-                    }
-                },
-                "required": ["data", "window_size"]
-            }
-        ),
-        Tool(
-            name="detect_trend",
-            description=(
-                "Identify and quantify trends in process data using linear or polynomial regression. "
-                "Use cases: equipment degradation trends, process efficiency decline, catalyst deactivation, "
-                "compressor performance degradation, heat exchanger fouling detection."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "data": {
-                        "type": "array",
-                        "items": {"type": "number"},
-                        "description": "Time series values",
-                        "minItems": 3
-                    },
-                    "timestamps": {
-                        "type": "array",
-                        "items": {"type": "number"},
-                        "description": "Optional time indices (defaults to 0, 1, 2...)"
-                    },
-                    "method": {
-                        "type": "string",
-                        "enum": ["linear", "polynomial"],
-                        "default": "linear"
-                    },
-                    "degree": {
-                        "type": "integer",
-                        "description": "Polynomial degree (only for polynomial method)",
-                        "minimum": 2,
-                        "maximum": 5,
-                        "default": 2
-                    }
-                },
-                "required": ["data"]
-            }
-        ),
-        Tool(
-            name="autocorrelation",
-            description=(
-                "Calculate autocorrelation function (ACF) to identify repeating patterns and cycles. "
-                "Use cases: detect cyclic patterns in batch processes, identify production cycle times, "
-                "find optimal sampling intervals, detect seasonality in energy consumption."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "data": {
-                        "type": "array",
-                        "items": {"type": "number"},
-                        "description": "Time series data",
-                        "minItems": 10
-                    },
-                    "max_lag": {
-                        "type": "integer",
-                        "description": "Maximum lag to calculate",
-                        "minimum": 1,
-                        "maximum": 500
-                    }
-                },
-                "required": ["data"]
-            }
-        ),
-        Tool(
-            name="change_point_detection",
-            description=(
-                "Identify significant changes in process behavior (regime changes, upsets, modifications). "
-                "Use cases: detect when process modifications were effective, identify process upsets, "
-                "find when equipment behavior changed, detect shift changes affecting production."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "data": {
-                        "type": "array",
-                        "items": {"type": "number"},
-                        "description": "Time series data",
-                        "minItems": 10
-                    },
-                    "method": {
-                        "type": "string",
-                        "enum": ["cusum", "standard_deviation", "mean_shift"],
-                        "default": "cusum"
-                    },
-                    "threshold": {
-                        "type": "number",
-                        "description": "Sensitivity threshold (higher = less sensitive)",
-                        "minimum": 0.1,
-                        "maximum": 10,
-                        "default": 1.5
-                    },
-                    "min_size": {
-                        "type": "integer",
-                        "description": "Minimum segment size between change points",
-                        "minimum": 2,
-                        "default": 5
-                    }
-                },
-                "required": ["data"]
-            }
-        ),
-        Tool(
-            name="rate_of_change",
-            description=(
-                "Calculate rate of change over time to detect acceleration or deceleration. "
-                "Use cases: monitor how fast temperature is rising during startup, detect rapid pressure "
-                "changes indicating leaks, track production rate changes, identify abnormal ramp rates."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "data": {
-                        "type": "array",
-                        "items": {"type": "number"},
-                        "description": "Time series values",
-                        "minItems": 2
-                    },
-                    "time_intervals": {
-                        "type": "array",
-                        "items": {"type": "number"},
-                        "description": "Time intervals between measurements (default: uniform)"
-                    },
-                    "method": {
-                        "type": "string",
-                        "enum": ["simple", "smoothed"],
-                        "default": "simple"
-                    },
-                    "smoothing_window": {
-                        "type": "integer",
-                        "description": "Window size for smoothed rate of change",
-                        "minimum": 2,
-                        "default": 3
-                    }
-                },
-                "required": ["data"]
-            }
-        ),
-        Tool(
-            name="rolling_statistics",
-            description=(
-                "Calculate rolling/windowed statistics for continuous monitoring. "
-                "Use cases: monitor rolling averages on SCADA displays, track process stability "
-                "with rolling standard deviation, calculate recent performance metrics, "
-                "implement sliding window quality checks."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "data": {
-                        "type": "array",
-                        "items": {"type": "number"},
-                        "description": "Time series data",
-                        "minItems": 2
-                    },
-                    "window_size": {
-                        "type": "integer",
-                        "description": "Rolling window size",
-                        "minimum": 2,
-                        "maximum": 1000
-                    },
-                    "statistics": {
-                        "type": "array",
-                        "items": {
-                            "type": "string",
-                            "enum": ["mean", "std", "min", "max", "median", "range", "variance"]
-                        },
-                        "default": ["mean", "std"]
-                    }
-                },
-                "required": ["data", "window_size"]
-            }
-        ),
-        Tool(
-            name="control_limits",
-            description=(
-                "Calculate control chart limits (UCL, LCL, centerline) for various chart types "
-                "including X-bar, Individuals, Range, Standard Deviation, and attribute charts (p, np, c, u). "
-                "Essential for manufacturing quality control, process monitoring, and Six Sigma programs. "
-                "Detects out-of-control points and provides actionable recommendations."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "data": {
-                        "type": "array",
-                        "items": {"type": "number"},
-                        "description": "Process measurements or subgroup statistics",
-                        "minItems": 5
-                    },
-                    "chart_type": {
-                        "type": "string",
-                        "enum": ["x_bar", "individuals", "range", "std_dev", "p", "np", "c", "u"],
-                        "description": "Type of control chart"
-                    },
-                    "subgroup_size": {
-                        "type": "integer",
-                        "description": "Size of subgroups (for X-bar, R, and S charts)",
-                        "minimum": 2,
-                        "maximum": 25,
-                        "default": 5
-                    },
-                    "sigma_level": {
-                        "type": "number",
-                        "description": "Number of standard deviations for limits (typical: 3)",
-                        "minimum": 1,
-                        "maximum": 6,
-                        "default": 3
-                    }
-                },
-                "required": ["data", "chart_type"]
-            }
-        ),
-        Tool(
-            name="process_capability",
-            description=(
-                "Calculate process capability indices (Cp, Cpk, Pp, Ppk) to assess if a process "
-                "meets customer specifications. Essential for Six Sigma programs, supplier qualification, "
-                "and process validation. Provides sigma level, estimated defect rates (PPM), and "
-                "actionable recommendations for process improvement."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "data": {
-                        "type": "array",
-                        "items": {"type": "number"},
-                        "description": "Process measurements (minimum 30 for reliable analysis)",
-                        "minItems": 30
-                    },
-                    "usl": {
-                        "type": "number",
-                        "description": "Upper specification limit"
-                    },
-                    "lsl": {
-                        "type": "number",
-                        "description": "Lower specification limit"
-                    },
-                    "target": {
-                        "type": "number",
-                        "description": "Target value (optional, defaults to midpoint of USL and LSL)"
-                    }
-                },
-                "required": ["data", "usl", "lsl"]
-            }
-        ),
-        Tool(
-            name="western_electric_rules",
-            description=(
-                "Apply Western Electric run rules to detect non-random patterns in control charts. "
-                "Implements 8 rules for early warning of process shifts, trends, and systematic variation. "
-                "More sensitive than traditional control limits for detecting assignable causes before "
-                "they result in out-of-control points. Essential for proactive process monitoring."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "data": {
-                        "type": "array",
-                        "items": {"type": "number"},
-                        "description": "Process measurements in time order",
-                        "minItems": 15
-                    },
-                    "centerline": {
-                        "type": "number",
-                        "description": "Process centerline (mean)"
-                    },
-                    "sigma": {
-                        "type": "number",
-                        "description": "Process standard deviation"
-                    },
-                    "rules_to_apply": {
-                        "type": "array",
-                        "items": {
-                            "type": "integer",
-                            "minimum": 1,
-                            "maximum": 8
-                        },
-                        "description": "Which rules to check (1-8, default: all rules)",
-                        "default": [1, 2, 3, 4, 5, 6, 7, 8]
-                    }
-                },
-                "required": ["data", "centerline", "sigma"]
-            }
-        ),
-        Tool(
-            name="cusum_chart",
-            description=(
-                "Implement CUSUM (Cumulative Sum) chart for detecting small persistent shifts in process mean. "
-                "More sensitive than traditional control charts for detecting shifts less than 1.5σ. "
-                "Ideal for monitoring gradual equipment degradation, process drift, and small but "
-                "persistent quality changes. Provides change point estimation and shift magnitude."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "data": {
-                        "type": "array",
-                        "items": {"type": "number"},
-                        "description": "Process measurements in time order",
-                        "minItems": 5
-                    },
-                    "target": {
-                        "type": "number",
-                        "description": "Target process value"
-                    },
-                    "k": {
-                        "type": "number",
-                        "description": "Reference value (typically 0.5σ, auto-calculated if not provided)"
-                    },
-                    "h": {
-                        "type": "number",
-                        "description": "Decision interval (typically 4σ or 5σ, auto-calculated if not provided)"
-                    },
-                    "sigma": {
-                        "type": "number",
-                        "description": "Process standard deviation (optional, estimated from data if not provided)"
-                    }
-                },
-                "required": ["data", "target"]
-            }
-        ),
-        Tool(
-            name="ewma_chart",
-            description=(
-                "Implement EWMA (Exponentially Weighted Moving Average) chart for detecting small shifts "
-                "in process mean. Balances between Shewhart and CUSUM charts by smoothing data while "
-                "remaining sensitive to shifts. Ideal for noisy processes where small shifts are critical "
-                "(e.g., chemical composition, pharmaceutical potency). Configurable weighting factor."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "data": {
-                        "type": "array",
-                        "items": {"type": "number"},
-                        "description": "Process measurements",
-                        "minItems": 5
-                    },
-                    "target": {
-                        "type": "number",
-                        "description": "Target process mean"
-                    },
-                    "sigma": {
-                        "type": "number",
-                        "description": "Process standard deviation"
-                    },
-                    "lambda_param": {
-                        "type": "number",
-                        "description": "Weighting factor (0-1, typical: 0.2, higher = more weight on recent data)",
-                        "minimum": 0.01,
-                        "maximum": 1.0,
-                        "default": 0.2
-                    },
-                    "l": {
-                        "type": "number",
-                        "description": "Control limit factor (typical: 3)",
-                        "default": 3.0
-                    }
-                },
-                "required": ["data", "target", "sigma"]
-            }
-        ),
-        Tool(
-            name="fft_analysis",
-            description=(
-                "Perform Fast Fourier Transform (FFT) for frequency domain analysis. "
-                "Use cases: bearing defect detection (BPFI, BPFO, BSF), motor electrical faults, "
-                "gearbox mesh frequency analysis, pump cavitation, compressor valve problems, fan imbalance."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "signal": {
-                        "type": "array",
-                        "items": {"type": "number"},
-                        "description": "Time-domain signal (vibration, current, acoustic, etc.)",
-                        "minItems": 8
-                    },
-                    "sample_rate": {
-                        "type": "number",
-                        "description": "Sampling frequency in Hz",
-                        "minimum": 1,
-                        "maximum": 1000000
-                    },
-                    "window": {
-                        "type": "string",
-                        "enum": ["hanning", "hamming", "blackman", "rectangular"],
-                        "default": "hanning",
-                        "description": "Windowing function to reduce spectral leakage"
-                    },
-                    "detrend": {
-                        "type": "boolean",
-                        "default": True,
-                        "description": "Remove DC component and linear trends"
-                    }
-                },
-                "required": ["signal", "sample_rate"]
-            }
-        ),
-        Tool(
-            name="power_spectral_density",
-            description=(
-                "Calculate Power Spectral Density (PSD) for energy distribution across frequencies. "
-                "Use cases: vibration energy distribution, noise level assessment, random vibration analysis, "
-                "process variable frequency content, acoustic signature analysis."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "signal": {
-                        "type": "array",
-                        "items": {"type": "number"},
-                        "description": "Time-domain signal",
-                        "minItems": 16
-                    },
-                    "sample_rate": {
-                        "type": "number",
-                        "description": "Sampling frequency in Hz"
-                    },
-                    "method": {
-                        "type": "string",
-                        "enum": ["welch", "periodogram"],
-                        "default": "welch",
-                        "description": "PSD estimation method - Welch is more accurate for noisy signals"
-                    },
-                    "nperseg": {
-                        "type": "integer",
-                        "default": 256,
-                        "description": "Length of each segment for Welch method"
-                    }
-                },
-                "required": ["signal", "sample_rate"]
-            }
-        ),
-        Tool(
-            name="rms_value",
-            description=(
-                "Calculate Root Mean Square (RMS) for overall signal energy. "
-                "Use cases: overall vibration severity (ISO 10816), electrical current RMS, "
-                "acoustic noise level, process variable stability, alarm threshold monitoring, trend tracking."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "signal": {
-                        "type": "array",
-                        "items": {"type": "number"},
-                        "description": "Time-domain signal",
-                        "minItems": 2
-                    },
-                    "window_size": {
-                        "type": "integer",
-                        "description": "Calculate rolling RMS (optional)",
-                        "minimum": 2
-                    },
-                    "reference_value": {
-                        "type": "number",
-                        "description": "Reference for dB calculation (e.g., 20 µPa for acoustic)"
-                    }
-                },
-                "required": ["signal"]
-            }
-        ),
-        Tool(
-            name="peak_detection",
-            description=(
-                "Identify significant peaks in signals with filtering and ranking. "
-                "Use cases: find dominant vibration frequencies, detect harmonic patterns, "
-                "identify resonance frequencies, bearing fault frequency detection, gear mesh frequencies."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "signal": {
-                        "type": "array",
-                        "items": {"type": "number"},
-                        "description": "Signal data (time or frequency domain)",
-                        "minItems": 3
-                    },
-                    "frequencies": {
-                        "type": "array",
-                        "items": {"type": "number"},
-                        "description": "Corresponding frequencies (for frequency domain data)"
-                    },
-                    "height": {
-                        "type": "number",
-                        "default": 0.1,
-                        "description": "Minimum peak height"
-                    },
-                    "distance": {
-                        "type": "integer",
-                        "default": 1,
-                        "description": "Minimum samples between peaks"
-                    },
-                    "prominence": {
-                        "type": "number",
-                        "default": 0.05,
-                        "description": "Required prominence (height above surroundings)"
-                    },
-                    "top_n": {
-                        "type": "integer",
-                        "default": 10,
-                        "maximum": 50,
-                        "description": "Return top N peaks only"
-                    }
-                },
-                "required": ["signal"]
-            }
-        ),
-        Tool(
-            name="signal_to_noise_ratio",
-            description=(
-                "Calculate Signal-to-Noise Ratio (SNR) to assess signal quality. "
-                "Use cases: sensor health monitoring, data acquisition quality check, "
-                "communication signal quality, measurement reliability, instrumentation validation."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "signal": {
-                        "type": "array",
-                        "items": {"type": "number"},
-                        "description": "Signal containing signal + noise",
-                        "minItems": 10
-                    },
-                    "noise": {
-                        "type": "array",
-                        "items": {"type": "number"},
-                        "description": "Noise reference (optional - will estimate if not provided)"
-                    },
-                    "method": {
-                        "type": "string",
-                        "enum": ["power", "amplitude", "peak"],
-                        "default": "power",
-                        "description": "SNR calculation method"
-                    }
-                },
-                "required": ["signal"]
-            }
-        ),
-        Tool(
-            name="harmonic_analysis",
-            description=(
-                "Detect and analyze harmonic content in electrical and mechanical signals. "
-                "Use cases: power quality assessment (THD), variable frequency drive effects, "
-                "motor current signature analysis (MCSA), electrical fault detection, IEEE 519 compliance."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "signal": {
-                        "type": "array",
-                        "items": {"type": "number"},
-                        "description": "Periodic signal (voltage, current, vibration)",
-                        "minItems": 64
-                    },
-                    "sample_rate": {
-                        "type": "number",
-                        "description": "Sampling frequency in Hz"
-                    },
-                    "fundamental_freq": {
-                        "type": "number",
-                        "description": "Expected fundamental frequency (e.g., 60 Hz for electrical)",
-                        "minimum": 1
-                    },
-                    "max_harmonic": {
-                        "type": "integer",
-                        "default": 50,
-                        "maximum": 100,
-                        "description": "Maximum harmonic order to analyze"
-                    }
-                },
-                "required": ["signal", "sample_rate", "fundamental_freq"]
-            }
-        ),
-        Tool(
-            name="linear_regression",
-            description=(
-                "Perform simple or multiple linear regression with comprehensive diagnostics. "
-                "Use cases: equipment efficiency vs. load, energy consumption vs. production rate, "
-                "pump performance curves, temperature vs. pressure relationships, vibration vs. bearing wear. "
-                "Returns coefficients, R², confidence intervals, diagnostics (Durbin-Watson), and interpretation."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "x": {
-                        "description": "Independent variable(s) - single array for simple regression or array of arrays for multiple regression",
-                        "minItems": 3
-                    },
-                    "y": {
-                        "type": "array",
-                        "items": {"type": "number"},
-                        "description": "Dependent variable (response)",
-                        "minItems": 3
-                    },
-                    "confidence_level": {
-                        "type": "number",
-                        "description": f"Confidence level for intervals ({MIN_CONFIDENCE_LEVEL}-{MAX_CONFIDENCE_LEVEL})",
-                        "minimum": MIN_CONFIDENCE_LEVEL,
-                        "maximum": MAX_CONFIDENCE_LEVEL,
-                        "default": 0.95
-                    },
-                    "include_diagnostics": {
-                        "type": "boolean",
-                        "description": "Include full regression diagnostics",
-                        "default": True
-                    }
-                },
-                "required": ["x", "y"]
-            }
-        ),
-        Tool(
-            name="polynomial_regression",
-            description=(
-                "Fit polynomial curves for non-linear relationships. "
-                "Use cases: compressor performance curves, valve characteristics, catalyst activity decline, "
-                "temperature profiles, motor torque vs. speed, pump efficiency curves. "
-                "Returns coefficients, R², turning points, optimal values, and interpretation."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "x": {
-                        "type": "array",
-                        "items": {"type": "number"},
-                        "description": "Independent variable",
-                        "minItems": 5
-                    },
-                    "y": {
-                        "type": "array",
-                        "items": {"type": "number"},
-                        "description": "Dependent variable",
-                        "minItems": 5
-                    },
-                    "degree": {
-                        "type": "integer",
-                        "description": "Polynomial degree (2=quadratic, 3=cubic)",
-                        "minimum": 2,
-                        "maximum": 6,
-                        "default": 2
-                    },
-                    "auto_select_degree": {
-                        "type": "boolean",
-                        "description": "Automatically select best degree based on adjusted R²",
-                        "default": False
-                    }
-                },
-                "required": ["x", "y"]
-            }
-        ),
-        Tool(
-            name="residual_analysis",
-            description=(
-                "Comprehensive analysis of regression residuals to validate model assumptions. "
-                "Use cases: validate assumptions, detect non-linearity, identify outliers, check heteroscedasticity, "
-                "verify normality, detect autocorrelation. Includes Shapiro-Wilk, Durbin-Watson tests."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "actual": {
-                        "type": "array",
-                        "items": {"type": "number"},
-                        "description": "Actual observed values",
-                        "minItems": 10
-                    },
-                    "predicted": {
-                        "type": "array",
-                        "items": {"type": "number"},
-                        "description": "Model predicted values",
-                        "minItems": 10
-                    },
-                    "x_values": {
-                        "type": "array",
-                        "items": {"type": "number"},
-                        "description": "Independent variable values (optional)",
-                        "minItems": 10
-                    }
-                },
-                "required": ["actual", "predicted"]
-            }
-        ),
-        Tool(
-            name="prediction_with_intervals",
-            description=(
-                "Generate predictions with confidence and prediction intervals. "
-                "Use cases: forecast equipment performance, estimate production with uncertainty, "
-                "predict energy consumption with confidence intervals, estimate maintenance costs, "
-                "calculate valve position for desired flow, predict process yield with tolerance bands."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "model": {
-                        "type": "object",
-                        "description": "Regression model from linear_regression or polynomial_regression (must have 'coefficients' and 'rmse')"
-                    },
-                    "x_new": {
-                        "type": "array",
-                        "description": "New x values for prediction",
-                        "minItems": 1
-                    },
-                    "confidence_level": {
-                        "type": "number",
-                        "description": "Confidence level (0-1)",
-                        "minimum": 0,
-                        "maximum": 1,
-                        "default": 0.95
-                    }
-                },
-                "required": ["model", "x_new"]
-            }
-        ),
-        Tool(
-            name="multivariate_regression",
-            description=(
-                "Multiple linear regression with multiple independent variables. "
-                "Use cases: chiller efficiency vs. multiple factors, production yield vs. process parameters, "
-                "energy consumption vs. multiple conditions, compressor power vs. pressures and flow, "
-                "product quality vs. process variables. Includes VIF for multicollinearity detection."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "X": {
-                        "type": "array",
-                        "description": "Matrix of independent variables [[x1_1, x2_1, ...], [x1_2, x2_2, ...], ...]",
-                        "minItems": 5
-                    },
-                    "y": {
-                        "type": "array",
-                        "items": {"type": "number"},
-                        "description": "Dependent variable",
-                        "minItems": 5
-                    },
-                    "variable_names": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "Names for each independent variable"
-                    },
-                    "standardize": {
-                        "type": "boolean",
-                        "description": "Standardize variables for coefficient comparison",
-                        "default": False
-                    }
-                },
-                "required": ["X", "y"]
-            }
-        ),
-        Tool(
-            name="z_score_detection",
-            description=(
-                "Detect outliers using standard or modified Z-score methods. "
-                "Standard method uses mean/std, modified uses median/MAD for robustness. "
-                "Use cases: normally distributed process variables (temperature, pressure), "
-                "quick screening of large datasets, real-time sensor validation, quality control measurements."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "data": {
-                        "type": "array",
-                        "items": {"type": "number"},
-                        "description": "Measurements to check for outliers",
-                        "minItems": 3
-                    },
-                    "method": {
-                        "type": "string",
-                        "enum": ["standard", "modified"],
-                        "default": "modified",
-                        "description": "Standard (mean/std) or Modified (median/MAD) - modified is more robust"
-                    },
-                    "threshold": {
-                        "type": "number",
-                        "description": "Z-score threshold (typical: 3.0 for standard, 3.5 for modified)",
-                        "minimum": 1.0,
-                        "maximum": 10.0,
-                        "default": 3.0
-                    },
-                    "two_tailed": {
-                        "type": "boolean",
-                        "description": "Detect outliers on both sides",
-                        "default": True
-                    }
-                },
-                "required": ["data"]
-            }
-        ),
-        Tool(
-            name="grubbs_test",
-            description=(
-                "Statistical test for detecting a single outlier in normally distributed data. "
-                "Grubbs' test identifies whether the most extreme value is a statistical outlier. "
-                "Use cases: reject suspicious calibration points, validate laboratory test results, "
-                "quality control for precise measurements, statistical rigor for critical decisions, "
-                "regulatory compliance (FDA, ISO)."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "data": {
-                        "type": "array",
-                        "items": {"type": "number"},
-                        "description": "Dataset to test for outliers",
-                        "minItems": 7
-                    },
-                    "alpha": {
-                        "type": "number",
-                        "description": "Significance level (typical: 0.05 or 0.01)",
-                        "minimum": 0.001,
-                        "maximum": 0.1,
-                        "default": 0.05
-                    },
-                    "method": {
-                        "type": "string",
-                        "enum": ["max", "min", "two_sided"],
-                        "default": "two_sided",
-                        "description": "Test for maximum outlier, minimum outlier, or both"
-                    }
-                },
-                "required": ["data"]
-            }
-        ),
-        Tool(
-            name="dixon_q_test",
-            description=(
-                "Quick outlier test for small datasets (3-30 points) using gap ratio. "
-                "Designed for small sample sizes where other tests may not be appropriate. "
-                "Use cases: laboratory quality control (small samples), pilot plant trials, "
-                "expensive test results validation, duplicate/triplicate measurements, shift samples."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "data": {
-                        "type": "array",
-                        "items": {"type": "number"},
-                        "description": "Small dataset (3-30 points)",
-                        "minItems": 3,
-                        "maxItems": 30
-                    },
-                    "alpha": {
-                        "type": "number",
-                        "description": "Significance level",
-                        "minimum": 0.001,
-                        "maximum": 0.1,
-                        "default": 0.05
-                    }
-                },
-                "required": ["data"]
-            }
-        ),
-        Tool(
-            name="isolation_forest",
-            description=(
-                "Machine learning-based anomaly detection using Isolation Forest algorithm. "
-                "Detects anomalies by isolating observations - anomalies are easier to isolate. "
-                "Use cases: multivariate anomaly detection (multiple sensors), complex process patterns, "
-                "equipment failure prediction, cyber security (unusual patterns), unstructured anomalies."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "data": {
-                        "type": "array",
-                        "description": "Univariate (list of numbers) or multivariate (list of lists)",
-                        "minItems": 10
-                    },
-                    "contamination": {
-                        "type": "number",
-                        "description": "Expected proportion of outliers (0-0.5)",
-                        "minimum": 0.0,
-                        "maximum": 0.5,
-                        "default": 0.1
-                    },
-                    "n_estimators": {
-                        "type": "integer",
-                        "description": "Number of isolation trees",
-                        "minimum": 50,
-                        "maximum": 500,
-                        "default": 100
-                    }
-                },
-                "required": ["data"]
-            }
-        ),
-        Tool(
-            name="mahalanobis_distance",
-            description=(
-                "Multivariate outlier detection considering correlations between variables. "
-                "Measures distance from center accounting for correlations. "
-                "Use cases: multiple correlated sensors, process state monitoring "
-                "(temperature+pressure+flow together), multivariate quality control, "
-                "equipment health monitoring (multiple parameters), pattern recognition."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "data": {
-                        "type": "array",
-                        "description": "Multivariate data [[x1, y1, z1], [x2, y2, z2], ...]",
-                        "minItems": 10
-                    },
-                    "threshold": {
-                        "type": "number",
-                        "description": "Chi-square threshold percentile (0.9-0.999)",
-                        "minimum": 0.9,
-                        "maximum": 0.999,
-                        "default": 0.975
-                    }
-                },
-                "required": ["data"]
-            }
-        ),
-        Tool(
-            name="streaming_outlier_detection",
-            description=(
-                "Real-time outlier detection for continuous sensor streams. "
-                "Evaluates new measurements against recent history for anomalies. "
-                "Use cases: real-time SCADA alarming, edge device data validation, "
-                "continuous process monitoring, high-frequency sensor data (1-second intervals), "
-                "telemetry data validation."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "current_value": {
-                        "type": "number",
-                        "description": "New measurement to evaluate"
-                    },
-                    "historical_window": {
-                        "type": "array",
-                        "items": {"type": "number"},
-                        "description": "Recent historical values for context",
-                        "minItems": 10,
-                        "maxItems": 1000
-                    },
-                    "method": {
-                        "type": "string",
-                        "enum": ["ewma", "cusum", "adaptive_threshold"],
-                        "default": "ewma",
-                        "description": "Detection method"
-                    },
-                    "sensitivity": {
-                        "type": "number",
-                        "description": "Detection sensitivity (1-10, higher = more sensitive)",
-                        "minimum": 1,
-                        "maximum": 10,
-                        "default": 5
-                    }
-                },
-                "required": ["current_value", "historical_window"]
-            }
-        )
-    ]
-
-
-@app.call_tool()
-async def call_tool(name: str, arguments: Any) -> CallToolResult:
-    """
-    Handle tool execution requests from MCP clients.
-    
-    This function is called when a client wants to use one of our tools.
-    It validates the tool name, extracts parameters, calls the appropriate
-    handler function, and returns the result.
-    
-    Args:
-        name: Name of the tool to execute
-        arguments: Dictionary of parameters for the tool
-        
-    Returns:
-        CallToolResult containing the tool's output or error information
-    """
-    logger.info(f"Tool called: {name}")
-    
-    try:
-        # Route to appropriate handler based on tool name
-        if name == "descriptive_stats":
-            return await handle_descriptive_stats(arguments)
-        elif name == "correlation":
-            return await handle_correlation(arguments)
-        elif name == "percentile":
-            return await handle_percentile(arguments)
-        elif name == "detect_outliers":
-            return await handle_detect_outliers(arguments)
-        elif name == "moving_average":
-            return await handle_moving_average(arguments)
-        elif name == "detect_trend":
-            return await handle_detect_trend(arguments)
-        elif name == "autocorrelation":
-            return await handle_autocorrelation(arguments)
-        elif name == "change_point_detection":
-            return await handle_change_point_detection(arguments)
-        elif name == "rate_of_change":
-            return await handle_rate_of_change(arguments)
-        elif name == "rolling_statistics":
-            return await handle_rolling_statistics(arguments)
-        elif name == "fft_analysis":
-            return await handle_fft_analysis(arguments)
-        elif name == "power_spectral_density":
-            return await handle_power_spectral_density(arguments)
-        elif name == "rms_value":
-            return await handle_rms_value(arguments)
-        elif name == "peak_detection":
-            return await handle_peak_detection(arguments)
-        elif name == "signal_to_noise_ratio":
-            return await handle_signal_to_noise_ratio(arguments)
-        elif name == "harmonic_analysis":
-            return await handle_harmonic_analysis(arguments)
-        elif name == "control_limits":
-            return await handle_control_limits(arguments)
-        elif name == "process_capability":
-            return await handle_process_capability(arguments)
-        elif name == "western_electric_rules":
-            return await handle_western_electric_rules(arguments)
-        elif name == "cusum_chart":
-            return await handle_cusum_chart(arguments)
-        elif name == "ewma_chart":
-            return await handle_ewma_chart(arguments)
-        elif name == "z_score_detection":
-            return await handle_z_score_detection(arguments)
-        elif name == "grubbs_test":
-            return await handle_grubbs_test(arguments)
-        elif name == "dixon_q_test":
-            return await handle_dixon_q_test(arguments)
-        elif name == "isolation_forest":
-            return await handle_isolation_forest(arguments)
-        elif name == "mahalanobis_distance":
-            return await handle_mahalanobis_distance(arguments)
-        elif name == "streaming_outlier_detection":
-            return await handle_streaming_outlier_detection(arguments)
-        else:
-            # Unknown tool name
-            logger.error(f"Unknown tool requested: {name}")
-            return CallToolResult(
-                content=[TextContent(
-                    type="text",
-                    text=f"Unknown tool: {name}"
-                )],
-                isError=True,
-            )
-    
-    except Exception as e:
-        # Catch any unexpected errors
-        logger.error(f"Unexpected error in tool {name}: {e}", exc_info=True)
-        return CallToolResult(
-            content=[TextContent(
-                type="text",
-                text=f"Internal error: {str(e)}"
-            )],
-            isError=True,
-        )
-
-
-# ============================================================================
-# Tool Handler Functions
-# ============================================================================
-
-
 async def handle_descriptive_stats(arguments: Any) -> CallToolResult:
     """Handle descriptive_stats tool calls."""
     # Extract and validate parameters
@@ -8844,454 +7517,1107 @@ async def handle_multivariate_regression(arguments: Any) -> CallToolResult:
         )
 
 
-async def run_http_server(host: str = "0.0.0.0", port: int = 8001, config_path: Optional[str] = None, dev_mode: bool = False):
-    """
-    Run the server using HTTP/SSE transport.
-    
-    This function starts the server using FastAPI with:
-    - SSE endpoint at /sse for server-to-client messages
-    - POST endpoint at /messages for client-to-server JSON-RPC requests
-    
-    This allows remote access from tools like GitHub Codespaces while
-    maintaining the MCP protocol over HTTP.
-    
-    Args:
-        host: Host to bind to (default: 0.0.0.0)
-        port: Port to bind to (default: 8001)
-        config_path: Optional path to configuration file
-        dev_mode: Enable development mode with hot-reload (default: False)
-    """
-    # Load configuration
-    try:
-        config = load_config(config_path)
-        set_config(config)
-        
-        # Update logging level based on configuration
-        log_level = getattr(logging, config.logging.level)
-        logger.setLevel(log_level)
-        logging.getLogger().setLevel(log_level)
-        
-        logger.info("Starting Statistical Analysis MCP server (HTTP mode)")
-        logger.info(f"Configuration loaded from: {config_path or 'defaults'}")
-        logger.info(f"Log level: {config.logging.level}")
-        logger.info(f"Server will listen on {host}:{port}")
-        
-    except (FileNotFoundError, ValueError) as e:
-        logger.error(f"Configuration error: {e}")
-        logger.error("Server startup failed due to configuration errors")
-        sys.exit(1)
-    
-    # Create FastAPI app
-    fastapi_app = FastAPI(title="Statistical Analysis MCP Server", version="1.0.0")
-    
-    # Setup middleware (CORS, authentication, rate limiting, logging)
-    setup_middleware(fastapi_app, config)
-    
-    # Initialize server state for monitoring
-    server_state = ServerState()
-    
-    # Store for SSE connections
-    sse_connections = []
-    
-    @fastapi_app.get("/sse")
-    async def sse_endpoint(request: Request):
-        """
-        Server-Sent Events endpoint for streaming server-to-client messages.
-        This endpoint streams MCP protocol messages from the server to the client.
-        """
-        async def event_generator():
-            try:
-                # Register this connection
-                connection_id = id(request)
-                sse_connections.append(connection_id)
-                server_state.increment_connections()
-                logger.info(f"New SSE connection established: {connection_id}")
-                
-                # Send initial connection message
-                yield {
-                    "event": "connected",
-                    "data": json.dumps({"status": "connected", "server": "stats-server"})
-                }
-                
-                # Keep the connection alive and send events
-                while True:
-                    # Check if client disconnected
-                    if await request.is_disconnected():
-                        logger.info(f"SSE connection disconnected: {connection_id}")
-                        break
-                    
-                    # Send keepalive ping every 30 seconds
-                    yield {
-                        "event": "ping",
-                        "data": json.dumps({"timestamp": datetime.now().isoformat()})
+# ============================================================================
+# Tool Definitions
+# ============================================================================
+
+STATS_TOOLS = [
+        Tool(
+            name="descriptive_stats",
+            description=(
+                "Calculate comprehensive descriptive statistics for a dataset including "
+                "mean, median, mode, standard deviation, variance, min, max, quartiles, "
+                "and range. Provides a complete statistical summary of numeric data."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Array of numerical values to analyze (1-10000 items)",
+                        "minItems": 1,
+                        "maxItems": 10000
                     }
-                    
-                    await asyncio.sleep(30)
-                    
-            except asyncio.CancelledError:
-                logger.info(f"SSE connection cancelled: {connection_id}")
-            except Exception as e:
-                logger.error(f"Error in SSE endpoint: {e}", exc_info=True)
-            finally:
-                if connection_id in sse_connections:
-                    sse_connections.remove(connection_id)
-                server_state.decrement_connections()
-                logger.info(f"SSE connection closed: {connection_id}")
-        
-        return EventSourceResponse(event_generator())
-    
-    @fastapi_app.post("/messages")
-    async def messages_endpoint(request: Request):
-        """
-        JSON-RPC 2.0 endpoint for client-to-server requests.
-        Handles MCP protocol messages sent from the client.
-        """
-        # Track request
-        server_state.increment_requests()
-        
-        try:
-            # Parse JSON-RPC request
-            body = await request.json()
-            logger.debug(f"Received JSON-RPC request: {body}")
-            
-            # Validate JSON-RPC 2.0 format
-            if "jsonrpc" not in body or body["jsonrpc"] != "2.0":
-                return {
-                    "jsonrpc": "2.0",
-                    "error": {
-                        "code": -32600,
-                        "message": "Invalid Request: missing or invalid jsonrpc version"
+                },
+                "required": ["data"]
+            }
+        ),
+        Tool(
+            name="correlation",
+            description=(
+                "Calculate Pearson correlation coefficient and covariance between two datasets. "
+                "Returns correlation coefficient (-1 to +1), and interpretation. "
+                "Measures the strength and direction of linear relationship between variables."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "x": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "First dataset (2-1000 items)",
+                        "minItems": 2,
+                        "maxItems": 1000
                     },
-                    "id": body.get("id")
-                }
-            
-            method = body.get("method")
-            params = body.get("params", {})
-            request_id = body.get("id")
-            
-            # Handle different MCP methods
-            if method == "initialize":
-                result = {
-                    "protocolVersion": "2024-11-05",
-                    "capabilities": {
-                        "tools": {}
-                    },
-                    "serverInfo": {
-                        "name": "stats-server",
-                        "version": "1.0.0"
+                    "y": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Second dataset (must be same length as x)",
+                        "minItems": 2,
+                        "maxItems": 1000
                     }
-                }
-            elif method == "tools/list":
-                # Return list of available tools
-                tools_list = await list_tools()
-                result = {"tools": [tool.model_dump() for tool in tools_list]}
-            elif method == "tools/call":
-                # Call a specific tool
-                tool_name = params.get("name")
-                tool_arguments = params.get("arguments", {})
-                
-                # Execute the tool
-                tool_result = await call_tool(tool_name, tool_arguments)
-                result = {
-                    "content": [content.model_dump() for content in tool_result.content],
-                    "isError": tool_result.isError
-                }
-            else:
-                return {
-                    "jsonrpc": "2.0",
-                    "error": {
-                        "code": -32601,
-                        "message": f"Method not found: {method}"
+                },
+                "required": ["x", "y"]
+            }
+        ),
+        Tool(
+            name="percentile",
+            description=(
+                "Calculate the value at a specific percentile in a dataset using linear "
+                "interpolation method. Returns the value below which the given percentage "
+                "of observations fall. Useful for quartiles, median, and percentile analysis."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Array of numerical values (1-10000 items)",
+                        "minItems": 1,
+                        "maxItems": 10000
                     },
-                    "id": request_id
-                }
-            
-            # Return successful response
-            return {
-                "jsonrpc": "2.0",
-                "result": result,
-                "id": request_id
-            }
-            
-        except json.JSONDecodeError:
-            return {
-                "jsonrpc": "2.0",
-                "error": {
-                    "code": -32700,
-                    "message": "Parse error: invalid JSON"
+                    "percentile": {
+                        "type": "number",
+                        "description": "Percentile to calculate (0-100). Common values: 25 (Q1), 50 (median), 75 (Q3), 90, 95, 99",
+                        "minimum": 0,
+                        "maximum": 100
+                    }
                 },
-                "id": None
+                "required": ["data", "percentile"]
             }
-        except Exception as e:
-            logger.error(f"Error handling message: {e}", exc_info=True)
-            return {
-                "jsonrpc": "2.0",
-                "error": {
-                    "code": -32603,
-                    "message": f"Internal error: {str(e)}"
+        ),
+        Tool(
+            name="detect_outliers",
+            description=(
+                "Detect outliers in a dataset using the Interquartile Range (IQR) method "
+                "with configurable threshold multiplier. Returns outlier values, indices, "
+                "and statistical boundaries (Q1, Q3, IQR). Standard threshold is 1.5 for "
+                "typical outliers, 3.0 for extreme outliers."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Array of numerical values to check for outliers (4-10000 items, minimum 4 needed for quartiles)",
+                        "minItems": 4,
+                        "maxItems": 10000
+                    },
+                    "threshold": {
+                        "type": "number",
+                        "description": "IQR multiplier for outlier detection (0.1-10, default: 1.5 for standard outliers, 3.0 for extreme outliers)",
+                        "minimum": 0.1,
+                        "maximum": 10,
+                        "default": 1.5
+                    }
                 },
-                "id": body.get("id") if isinstance(body, dict) else None
+                "required": ["data"]
             }
-    
-    @fastapi_app.get("/health")
-    async def health_check():
-        """
-        Health check endpoint - basic liveness check.
-        Always returns 200 OK with server status and uptime.
-        """
-        return {
-            "status": "ok",
-            "server": "stats-server",
-            "uptime_seconds": round(server_state.get_uptime_seconds(), 2),
-            "timestamp": datetime.now().isoformat() + "Z"
-        }
-    
-    @fastapi_app.get("/ready")
-    async def readiness_check():
-        """
-        Readiness check endpoint - indicates if server is ready to accept requests.
-        Returns 200 if ready, 503 if not ready.
-        """
-        if server_state.mcp_initialized:
-            # Get tools count
-            tools_list = await list_tools()
-            return {
-                "status": "ready",
-                "mcp_initialized": True,
-                "tools_count": len(tools_list)
+        ),
+        Tool(
+            name="moving_average",
+            description=(
+                "Calculate Simple, Exponential, or Weighted Moving Averages for smoothing process data. "
+                "Use cases: smooth noisy sensor readings, trend visualization, filter high-frequency noise, "
+                "identify underlying process trends in industrial automation and SCADA systems."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Time series data (e.g., hourly temperature readings)",
+                        "minItems": 2
+                    },
+                    "window_size": {
+                        "type": "integer",
+                        "description": "Number of periods for moving average",
+                        "minimum": 2,
+                        "maximum": 1000
+                    },
+                    "ma_type": {
+                        "type": "string",
+                        "enum": ["simple", "exponential", "weighted"],
+                        "default": "simple",
+                        "description": "Type of moving average"
+                    },
+                    "alpha": {
+                        "type": "number",
+                        "description": "Smoothing factor for EMA (0-1), default 2/(window_size+1)",
+                        "minimum": 0,
+                        "maximum": 1
+                    }
+                },
+                "required": ["data", "window_size"]
             }
-        else:
-            return JSONResponse(
-                status_code=503,
-                content={
-                    "status": "not_ready",
-                    "mcp_initialized": False,
-                    "tools_count": 0
-                }
-            )
-    
-    @fastapi_app.get("/metrics")
-    async def metrics_endpoint():
-        """
-        Metrics endpoint - provides operational statistics.
-        Returns request counts, active connections, tools available, and uptime.
-        """
-        uptime_seconds = server_state.get_uptime_seconds()
-        tools_list = await list_tools()
-        
-        # Calculate requests per minute
-        uptime_minutes = uptime_seconds / 60.0
-        requests_per_minute = (
-            server_state.total_requests / uptime_minutes if uptime_minutes > 0 else 0.0
+        ),
+        Tool(
+            name="detect_trend",
+            description=(
+                "Identify and quantify trends in process data using linear or polynomial regression. "
+                "Use cases: equipment degradation trends, process efficiency decline, catalyst deactivation, "
+                "compressor performance degradation, heat exchanger fouling detection."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Time series values",
+                        "minItems": 3
+                    },
+                    "timestamps": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Optional time indices (defaults to 0, 1, 2...)"
+                    },
+                    "method": {
+                        "type": "string",
+                        "enum": ["linear", "polynomial"],
+                        "default": "linear"
+                    },
+                    "degree": {
+                        "type": "integer",
+                        "description": "Polynomial degree (only for polynomial method)",
+                        "minimum": 2,
+                        "maximum": 5,
+                        "default": 2
+                    }
+                },
+                "required": ["data"]
+            }
+        ),
+        Tool(
+            name="autocorrelation",
+            description=(
+                "Calculate autocorrelation function (ACF) to identify repeating patterns and cycles. "
+                "Use cases: detect cyclic patterns in batch processes, identify production cycle times, "
+                "find optimal sampling intervals, detect seasonality in energy consumption."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Time series data",
+                        "minItems": 10
+                    },
+                    "max_lag": {
+                        "type": "integer",
+                        "description": "Maximum lag to calculate",
+                        "minimum": 1,
+                        "maximum": 500
+                    }
+                },
+                "required": ["data"]
+            }
+        ),
+        Tool(
+            name="change_point_detection",
+            description=(
+                "Identify significant changes in process behavior (regime changes, upsets, modifications). "
+                "Use cases: detect when process modifications were effective, identify process upsets, "
+                "find when equipment behavior changed, detect shift changes affecting production."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Time series data",
+                        "minItems": 10
+                    },
+                    "method": {
+                        "type": "string",
+                        "enum": ["cusum", "standard_deviation", "mean_shift"],
+                        "default": "cusum"
+                    },
+                    "threshold": {
+                        "type": "number",
+                        "description": "Sensitivity threshold (higher = less sensitive)",
+                        "minimum": 0.1,
+                        "maximum": 10,
+                        "default": 1.5
+                    },
+                    "min_size": {
+                        "type": "integer",
+                        "description": "Minimum segment size between change points",
+                        "minimum": 2,
+                        "default": 5
+                    }
+                },
+                "required": ["data"]
+            }
+        ),
+        Tool(
+            name="rate_of_change",
+            description=(
+                "Calculate rate of change over time to detect acceleration or deceleration. "
+                "Use cases: monitor how fast temperature is rising during startup, detect rapid pressure "
+                "changes indicating leaks, track production rate changes, identify abnormal ramp rates."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Time series values",
+                        "minItems": 2
+                    },
+                    "time_intervals": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Time intervals between measurements (default: uniform)"
+                    },
+                    "method": {
+                        "type": "string",
+                        "enum": ["simple", "smoothed"],
+                        "default": "simple"
+                    },
+                    "smoothing_window": {
+                        "type": "integer",
+                        "description": "Window size for smoothed rate of change",
+                        "minimum": 2,
+                        "default": 3
+                    }
+                },
+                "required": ["data"]
+            }
+        ),
+        Tool(
+            name="rolling_statistics",
+            description=(
+                "Calculate rolling/windowed statistics for continuous monitoring. "
+                "Use cases: monitor rolling averages on SCADA displays, track process stability "
+                "with rolling standard deviation, calculate recent performance metrics, "
+                "implement sliding window quality checks."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Time series data",
+                        "minItems": 2
+                    },
+                    "window_size": {
+                        "type": "integer",
+                        "description": "Rolling window size",
+                        "minimum": 2,
+                        "maximum": 1000
+                    },
+                    "statistics": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "enum": ["mean", "std", "min", "max", "median", "range", "variance"]
+                        },
+                        "default": ["mean", "std"]
+                    }
+                },
+                "required": ["data", "window_size"]
+            }
+        ),
+        Tool(
+            name="control_limits",
+            description=(
+                "Calculate control chart limits (UCL, LCL, centerline) for various chart types "
+                "including X-bar, Individuals, Range, Standard Deviation, and attribute charts (p, np, c, u). "
+                "Essential for manufacturing quality control, process monitoring, and Six Sigma programs. "
+                "Detects out-of-control points and provides actionable recommendations."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Process measurements or subgroup statistics",
+                        "minItems": 5
+                    },
+                    "chart_type": {
+                        "type": "string",
+                        "enum": ["x_bar", "individuals", "range", "std_dev", "p", "np", "c", "u"],
+                        "description": "Type of control chart"
+                    },
+                    "subgroup_size": {
+                        "type": "integer",
+                        "description": "Size of subgroups (for X-bar, R, and S charts)",
+                        "minimum": 2,
+                        "maximum": 25,
+                        "default": 5
+                    },
+                    "sigma_level": {
+                        "type": "number",
+                        "description": "Number of standard deviations for limits (typical: 3)",
+                        "minimum": 1,
+                        "maximum": 6,
+                        "default": 3
+                    }
+                },
+                "required": ["data", "chart_type"]
+            }
+        ),
+        Tool(
+            name="process_capability",
+            description=(
+                "Calculate process capability indices (Cp, Cpk, Pp, Ppk) to assess if a process "
+                "meets customer specifications. Essential for Six Sigma programs, supplier qualification, "
+                "and process validation. Provides sigma level, estimated defect rates (PPM), and "
+                "actionable recommendations for process improvement."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Process measurements (minimum 30 for reliable analysis)",
+                        "minItems": 30
+                    },
+                    "usl": {
+                        "type": "number",
+                        "description": "Upper specification limit"
+                    },
+                    "lsl": {
+                        "type": "number",
+                        "description": "Lower specification limit"
+                    },
+                    "target": {
+                        "type": "number",
+                        "description": "Target value (optional, defaults to midpoint of USL and LSL)"
+                    }
+                },
+                "required": ["data", "usl", "lsl"]
+            }
+        ),
+        Tool(
+            name="western_electric_rules",
+            description=(
+                "Apply Western Electric run rules to detect non-random patterns in control charts. "
+                "Implements 8 rules for early warning of process shifts, trends, and systematic variation. "
+                "More sensitive than traditional control limits for detecting assignable causes before "
+                "they result in out-of-control points. Essential for proactive process monitoring."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Process measurements in time order",
+                        "minItems": 15
+                    },
+                    "centerline": {
+                        "type": "number",
+                        "description": "Process centerline (mean)"
+                    },
+                    "sigma": {
+                        "type": "number",
+                        "description": "Process standard deviation"
+                    },
+                    "rules_to_apply": {
+                        "type": "array",
+                        "items": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 8
+                        },
+                        "description": "Which rules to check (1-8, default: all rules)",
+                        "default": [1, 2, 3, 4, 5, 6, 7, 8]
+                    }
+                },
+                "required": ["data", "centerline", "sigma"]
+            }
+        ),
+        Tool(
+            name="cusum_chart",
+            description=(
+                "Implement CUSUM (Cumulative Sum) chart for detecting small persistent shifts in process mean. "
+                "More sensitive than traditional control charts for detecting shifts less than 1.5σ. "
+                "Ideal for monitoring gradual equipment degradation, process drift, and small but "
+                "persistent quality changes. Provides change point estimation and shift magnitude."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Process measurements in time order",
+                        "minItems": 5
+                    },
+                    "target": {
+                        "type": "number",
+                        "description": "Target process value"
+                    },
+                    "k": {
+                        "type": "number",
+                        "description": "Reference value (typically 0.5σ, auto-calculated if not provided)"
+                    },
+                    "h": {
+                        "type": "number",
+                        "description": "Decision interval (typically 4σ or 5σ, auto-calculated if not provided)"
+                    },
+                    "sigma": {
+                        "type": "number",
+                        "description": "Process standard deviation (optional, estimated from data if not provided)"
+                    }
+                },
+                "required": ["data", "target"]
+            }
+        ),
+        Tool(
+            name="ewma_chart",
+            description=(
+                "Implement EWMA (Exponentially Weighted Moving Average) chart for detecting small shifts "
+                "in process mean. Balances between Shewhart and CUSUM charts by smoothing data while "
+                "remaining sensitive to shifts. Ideal for noisy processes where small shifts are critical "
+                "(e.g., chemical composition, pharmaceutical potency). Configurable weighting factor."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Process measurements",
+                        "minItems": 5
+                    },
+                    "target": {
+                        "type": "number",
+                        "description": "Target process mean"
+                    },
+                    "sigma": {
+                        "type": "number",
+                        "description": "Process standard deviation"
+                    },
+                    "lambda_param": {
+                        "type": "number",
+                        "description": "Weighting factor (0-1, typical: 0.2, higher = more weight on recent data)",
+                        "minimum": 0.01,
+                        "maximum": 1.0,
+                        "default": 0.2
+                    },
+                    "l": {
+                        "type": "number",
+                        "description": "Control limit factor (typical: 3)",
+                        "default": 3.0
+                    }
+                },
+                "required": ["data", "target", "sigma"]
+            }
+        ),
+        Tool(
+            name="fft_analysis",
+            description=(
+                "Perform Fast Fourier Transform (FFT) for frequency domain analysis. "
+                "Use cases: bearing defect detection (BPFI, BPFO, BSF), motor electrical faults, "
+                "gearbox mesh frequency analysis, pump cavitation, compressor valve problems, fan imbalance."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "signal": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Time-domain signal (vibration, current, acoustic, etc.)",
+                        "minItems": 8
+                    },
+                    "sample_rate": {
+                        "type": "number",
+                        "description": "Sampling frequency in Hz",
+                        "minimum": 1,
+                        "maximum": 1000000
+                    },
+                    "window": {
+                        "type": "string",
+                        "enum": ["hanning", "hamming", "blackman", "rectangular"],
+                        "default": "hanning",
+                        "description": "Windowing function to reduce spectral leakage"
+                    },
+                    "detrend": {
+                        "type": "boolean",
+                        "default": True,
+                        "description": "Remove DC component and linear trends"
+                    }
+                },
+                "required": ["signal", "sample_rate"]
+            }
+        ),
+        Tool(
+            name="power_spectral_density",
+            description=(
+                "Calculate Power Spectral Density (PSD) for energy distribution across frequencies. "
+                "Use cases: vibration energy distribution, noise level assessment, random vibration analysis, "
+                "process variable frequency content, acoustic signature analysis."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "signal": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Time-domain signal",
+                        "minItems": 16
+                    },
+                    "sample_rate": {
+                        "type": "number",
+                        "description": "Sampling frequency in Hz"
+                    },
+                    "method": {
+                        "type": "string",
+                        "enum": ["welch", "periodogram"],
+                        "default": "welch",
+                        "description": "PSD estimation method - Welch is more accurate for noisy signals"
+                    },
+                    "nperseg": {
+                        "type": "integer",
+                        "default": 256,
+                        "description": "Length of each segment for Welch method"
+                    }
+                },
+                "required": ["signal", "sample_rate"]
+            }
+        ),
+        Tool(
+            name="rms_value",
+            description=(
+                "Calculate Root Mean Square (RMS) for overall signal energy. "
+                "Use cases: overall vibration severity (ISO 10816), electrical current RMS, "
+                "acoustic noise level, process variable stability, alarm threshold monitoring, trend tracking."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "signal": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Time-domain signal",
+                        "minItems": 2
+                    },
+                    "window_size": {
+                        "type": "integer",
+                        "description": "Calculate rolling RMS (optional)",
+                        "minimum": 2
+                    },
+                    "reference_value": {
+                        "type": "number",
+                        "description": "Reference for dB calculation (e.g., 20 µPa for acoustic)"
+                    }
+                },
+                "required": ["signal"]
+            }
+        ),
+        Tool(
+            name="peak_detection",
+            description=(
+                "Identify significant peaks in signals with filtering and ranking. "
+                "Use cases: find dominant vibration frequencies, detect harmonic patterns, "
+                "identify resonance frequencies, bearing fault frequency detection, gear mesh frequencies."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "signal": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Signal data (time or frequency domain)",
+                        "minItems": 3
+                    },
+                    "frequencies": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Corresponding frequencies (for frequency domain data)"
+                    },
+                    "height": {
+                        "type": "number",
+                        "default": 0.1,
+                        "description": "Minimum peak height"
+                    },
+                    "distance": {
+                        "type": "integer",
+                        "default": 1,
+                        "description": "Minimum samples between peaks"
+                    },
+                    "prominence": {
+                        "type": "number",
+                        "default": 0.05,
+                        "description": "Required prominence (height above surroundings)"
+                    },
+                    "top_n": {
+                        "type": "integer",
+                        "default": 10,
+                        "maximum": 50,
+                        "description": "Return top N peaks only"
+                    }
+                },
+                "required": ["signal"]
+            }
+        ),
+        Tool(
+            name="signal_to_noise_ratio",
+            description=(
+                "Calculate Signal-to-Noise Ratio (SNR) to assess signal quality. "
+                "Use cases: sensor health monitoring, data acquisition quality check, "
+                "communication signal quality, measurement reliability, instrumentation validation."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "signal": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Signal containing signal + noise",
+                        "minItems": 10
+                    },
+                    "noise": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Noise reference (optional - will estimate if not provided)"
+                    },
+                    "method": {
+                        "type": "string",
+                        "enum": ["power", "amplitude", "peak"],
+                        "default": "power",
+                        "description": "SNR calculation method"
+                    }
+                },
+                "required": ["signal"]
+            }
+        ),
+        Tool(
+            name="harmonic_analysis",
+            description=(
+                "Detect and analyze harmonic content in electrical and mechanical signals. "
+                "Use cases: power quality assessment (THD), variable frequency drive effects, "
+                "motor current signature analysis (MCSA), electrical fault detection, IEEE 519 compliance."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "signal": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Periodic signal (voltage, current, vibration)",
+                        "minItems": 64
+                    },
+                    "sample_rate": {
+                        "type": "number",
+                        "description": "Sampling frequency in Hz"
+                    },
+                    "fundamental_freq": {
+                        "type": "number",
+                        "description": "Expected fundamental frequency (e.g., 60 Hz for electrical)",
+                        "minimum": 1
+                    },
+                    "max_harmonic": {
+                        "type": "integer",
+                        "default": 50,
+                        "maximum": 100,
+                        "description": "Maximum harmonic order to analyze"
+                    }
+                },
+                "required": ["signal", "sample_rate", "fundamental_freq"]
+            }
+        ),
+        Tool(
+            name="linear_regression",
+            description=(
+                "Perform simple or multiple linear regression with comprehensive diagnostics. "
+                "Use cases: equipment efficiency vs. load, energy consumption vs. production rate, "
+                "pump performance curves, temperature vs. pressure relationships, vibration vs. bearing wear. "
+                "Returns coefficients, R², confidence intervals, diagnostics (Durbin-Watson), and interpretation."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "x": {
+                        "description": "Independent variable(s) - single array for simple regression or array of arrays for multiple regression",
+                        "minItems": 3
+                    },
+                    "y": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Dependent variable (response)",
+                        "minItems": 3
+                    },
+                    "confidence_level": {
+                        "type": "number",
+                        "description": f"Confidence level for intervals ({MIN_CONFIDENCE_LEVEL}-{MAX_CONFIDENCE_LEVEL})",
+                        "minimum": MIN_CONFIDENCE_LEVEL,
+                        "maximum": MAX_CONFIDENCE_LEVEL,
+                        "default": 0.95
+                    },
+                    "include_diagnostics": {
+                        "type": "boolean",
+                        "description": "Include full regression diagnostics",
+                        "default": True
+                    }
+                },
+                "required": ["x", "y"]
+            }
+        ),
+        Tool(
+            name="polynomial_regression",
+            description=(
+                "Fit polynomial curves for non-linear relationships. "
+                "Use cases: compressor performance curves, valve characteristics, catalyst activity decline, "
+                "temperature profiles, motor torque vs. speed, pump efficiency curves. "
+                "Returns coefficients, R², turning points, optimal values, and interpretation."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "x": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Independent variable",
+                        "minItems": 5
+                    },
+                    "y": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Dependent variable",
+                        "minItems": 5
+                    },
+                    "degree": {
+                        "type": "integer",
+                        "description": "Polynomial degree (2=quadratic, 3=cubic)",
+                        "minimum": 2,
+                        "maximum": 6,
+                        "default": 2
+                    },
+                    "auto_select_degree": {
+                        "type": "boolean",
+                        "description": "Automatically select best degree based on adjusted R²",
+                        "default": False
+                    }
+                },
+                "required": ["x", "y"]
+            }
+        ),
+        Tool(
+            name="residual_analysis",
+            description=(
+                "Comprehensive analysis of regression residuals to validate model assumptions. "
+                "Use cases: validate assumptions, detect non-linearity, identify outliers, check heteroscedasticity, "
+                "verify normality, detect autocorrelation. Includes Shapiro-Wilk, Durbin-Watson tests."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "actual": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Actual observed values",
+                        "minItems": 10
+                    },
+                    "predicted": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Model predicted values",
+                        "minItems": 10
+                    },
+                    "x_values": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Independent variable values (optional)",
+                        "minItems": 10
+                    }
+                },
+                "required": ["actual", "predicted"]
+            }
+        ),
+        Tool(
+            name="prediction_with_intervals",
+            description=(
+                "Generate predictions with confidence and prediction intervals. "
+                "Use cases: forecast equipment performance, estimate production with uncertainty, "
+                "predict energy consumption with confidence intervals, estimate maintenance costs, "
+                "calculate valve position for desired flow, predict process yield with tolerance bands."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "model": {
+                        "type": "object",
+                        "description": "Regression model from linear_regression or polynomial_regression (must have 'coefficients' and 'rmse')"
+                    },
+                    "x_new": {
+                        "type": "array",
+                        "description": "New x values for prediction",
+                        "minItems": 1
+                    },
+                    "confidence_level": {
+                        "type": "number",
+                        "description": "Confidence level (0-1)",
+                        "minimum": 0,
+                        "maximum": 1,
+                        "default": 0.95
+                    }
+                },
+                "required": ["model", "x_new"]
+            }
+        ),
+        Tool(
+            name="multivariate_regression",
+            description=(
+                "Multiple linear regression with multiple independent variables. "
+                "Use cases: chiller efficiency vs. multiple factors, production yield vs. process parameters, "
+                "energy consumption vs. multiple conditions, compressor power vs. pressures and flow, "
+                "product quality vs. process variables. Includes VIF for multicollinearity detection."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "X": {
+                        "type": "array",
+                        "description": "Matrix of independent variables [[x1_1, x2_1, ...], [x1_2, x2_2, ...], ...]",
+                        "minItems": 5
+                    },
+                    "y": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Dependent variable",
+                        "minItems": 5
+                    },
+                    "variable_names": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Names for each independent variable"
+                    },
+                    "standardize": {
+                        "type": "boolean",
+                        "description": "Standardize variables for coefficient comparison",
+                        "default": False
+                    }
+                },
+                "required": ["X", "y"]
+            }
+        ),
+        Tool(
+            name="z_score_detection",
+            description=(
+                "Detect outliers using standard or modified Z-score methods. "
+                "Standard method uses mean/std, modified uses median/MAD for robustness. "
+                "Use cases: normally distributed process variables (temperature, pressure), "
+                "quick screening of large datasets, real-time sensor validation, quality control measurements."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Measurements to check for outliers",
+                        "minItems": 3
+                    },
+                    "method": {
+                        "type": "string",
+                        "enum": ["standard", "modified"],
+                        "default": "modified",
+                        "description": "Standard (mean/std) or Modified (median/MAD) - modified is more robust"
+                    },
+                    "threshold": {
+                        "type": "number",
+                        "description": "Z-score threshold (typical: 3.0 for standard, 3.5 for modified)",
+                        "minimum": 1.0,
+                        "maximum": 10.0,
+                        "default": 3.0
+                    },
+                    "two_tailed": {
+                        "type": "boolean",
+                        "description": "Detect outliers on both sides",
+                        "default": True
+                    }
+                },
+                "required": ["data"]
+            }
+        ),
+        Tool(
+            name="grubbs_test",
+            description=(
+                "Statistical test for detecting a single outlier in normally distributed data. "
+                "Grubbs' test identifies whether the most extreme value is a statistical outlier. "
+                "Use cases: reject suspicious calibration points, validate laboratory test results, "
+                "quality control for precise measurements, statistical rigor for critical decisions, "
+                "regulatory compliance (FDA, ISO)."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Dataset to test for outliers",
+                        "minItems": 7
+                    },
+                    "alpha": {
+                        "type": "number",
+                        "description": "Significance level (typical: 0.05 or 0.01)",
+                        "minimum": 0.001,
+                        "maximum": 0.1,
+                        "default": 0.05
+                    },
+                    "method": {
+                        "type": "string",
+                        "enum": ["max", "min", "two_sided"],
+                        "default": "two_sided",
+                        "description": "Test for maximum outlier, minimum outlier, or both"
+                    }
+                },
+                "required": ["data"]
+            }
+        ),
+        Tool(
+            name="dixon_q_test",
+            description=(
+                "Quick outlier test for small datasets (3-30 points) using gap ratio. "
+                "Designed for small sample sizes where other tests may not be appropriate. "
+                "Use cases: laboratory quality control (small samples), pilot plant trials, "
+                "expensive test results validation, duplicate/triplicate measurements, shift samples."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Small dataset (3-30 points)",
+                        "minItems": 3,
+                        "maxItems": 30
+                    },
+                    "alpha": {
+                        "type": "number",
+                        "description": "Significance level",
+                        "minimum": 0.001,
+                        "maximum": 0.1,
+                        "default": 0.05
+                    }
+                },
+                "required": ["data"]
+            }
+        ),
+        Tool(
+            name="isolation_forest",
+            description=(
+                "Machine learning-based anomaly detection using Isolation Forest algorithm. "
+                "Detects anomalies by isolating observations - anomalies are easier to isolate. "
+                "Use cases: multivariate anomaly detection (multiple sensors), complex process patterns, "
+                "equipment failure prediction, cyber security (unusual patterns), unstructured anomalies."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "description": "Univariate (list of numbers) or multivariate (list of lists)",
+                        "minItems": 10
+                    },
+                    "contamination": {
+                        "type": "number",
+                        "description": "Expected proportion of outliers (0-0.5)",
+                        "minimum": 0.0,
+                        "maximum": 0.5,
+                        "default": 0.1
+                    },
+                    "n_estimators": {
+                        "type": "integer",
+                        "description": "Number of isolation trees",
+                        "minimum": 50,
+                        "maximum": 500,
+                        "default": 100
+                    }
+                },
+                "required": ["data"]
+            }
+        ),
+        Tool(
+            name="mahalanobis_distance",
+            description=(
+                "Multivariate outlier detection considering correlations between variables. "
+                "Measures distance from center accounting for correlations. "
+                "Use cases: multiple correlated sensors, process state monitoring "
+                "(temperature+pressure+flow together), multivariate quality control, "
+                "equipment health monitoring (multiple parameters), pattern recognition."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "description": "Multivariate data [[x1, y1, z1], [x2, y2, z2], ...]",
+                        "minItems": 10
+                    },
+                    "threshold": {
+                        "type": "number",
+                        "description": "Chi-square threshold percentile (0.9-0.999)",
+                        "minimum": 0.9,
+                        "maximum": 0.999,
+                        "default": 0.975
+                    }
+                },
+                "required": ["data"]
+            }
+        ),
+        Tool(
+            name="streaming_outlier_detection",
+            description=(
+                "Real-time outlier detection for continuous sensor streams. "
+                "Evaluates new measurements against recent history for anomalies. "
+                "Use cases: real-time SCADA alarming, edge device data validation, "
+                "continuous process monitoring, high-frequency sensor data (1-second intervals), "
+                "telemetry data validation."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "current_value": {
+                        "type": "number",
+                        "description": "New measurement to evaluate"
+                    },
+                    "historical_window": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Recent historical values for context",
+                        "minItems": 10,
+                        "maxItems": 1000
+                    },
+                    "method": {
+                        "type": "string",
+                        "enum": ["ewma", "cusum", "adaptive_threshold"],
+                        "default": "ewma",
+                        "description": "Detection method"
+                    },
+                    "sensitivity": {
+                        "type": "number",
+                        "description": "Detection sensitivity (1-10, higher = more sensitive)",
+                        "minimum": 1,
+                        "maximum": 10,
+                        "default": 5
+                    }
+                },
+                "required": ["current_value", "historical_window"]
+            }
         )
-        
-        return {
-            "total_requests": server_state.total_requests,
-            "active_connections": server_state.active_connections,
-            "tools_available": len(tools_list),
-            "uptime_seconds": round(uptime_seconds, 2),
-            "requests_per_minute": round(requests_per_minute, 2)
-        }
-    
-    # Graceful shutdown handler
-    shutdown_event = asyncio.Event()
-    
-    def signal_handler(signum, frame):
-        """Handle shutdown signals."""
-        sig_name = signal.Signals(signum).name
-        logger.info(f"Received signal {sig_name}, initiating graceful shutdown...")
-        shutdown_event.set()
-    
-    # Register signal handlers
-    signal.signal(signal.SIGTERM, signal_handler)
-    signal.signal(signal.SIGINT, signal_handler)
-    
-    # Set up uvicorn configuration
-    if dev_mode:
-        # Development mode: Enable debug logging
-        logger.info("🔥 Development mode enabled - debug logging active")
-        logger.warning("Dev mode is for development only - do not use in production!")
-        logger.info("For hot-reload, use VS Code debug configs")
-        
-        # Set up logging for debug
-        logging.getLogger().setLevel(logging.DEBUG)
-        logger.setLevel(logging.DEBUG)
-        log_level = "debug"
-    else:
-        log_level = "info"
-    
-    config_uvicorn = uvicorn.Config(
-        fastapi_app,
-        host=host,
-        port=port,
-        log_level=log_level
-    )
-    server = uvicorn.Server(config_uvicorn)
-    
-    # Create server task
-    server_task = asyncio.create_task(server.serve())
-    
-    try:
-        # Wait for either server completion or shutdown signal
-        _, _ = await asyncio.wait(
-            [server_task, asyncio.create_task(shutdown_event.wait())],
-            return_when=asyncio.FIRST_COMPLETED
-        )
-        
-        # If shutdown was signaled, perform graceful cleanup
-        if shutdown_event.is_set():
-            logger.info("Shutting down server...")
-            logger.info(f"Closing {len(sse_connections)} active SSE connections...")
-            
-            # Signal server to shutdown
-            server.should_exit = True
-            
-            # Wait for server to shutdown (max 30 seconds)
-            try:
-                await asyncio.wait_for(server_task, timeout=30.0)
-            except asyncio.TimeoutError:
-                logger.warning("Server shutdown timed out after 30 seconds")
-            
-            logger.info("All connections closed")
-            logger.info("Shutdown complete")
-        
-    except Exception as e:
-        logger.error(f"Server error: {e}", exc_info=True)
-        sys.exit(1)
-
-
-async def run_stdio_server(config_path: Optional[str] = None):
-    """
-    Run the server using stdio transport.
-    
-    This function starts the server using stdio transport, which means:
-    - The server reads MCP protocol messages from stdin
-    - The server writes MCP protocol messages to stdout
-    - All logging and debugging output goes to stderr
-    
-    This is the standard transport for MCP servers that will be launched
-    by client applications like Claude Desktop.
-    
-    Args:
-        config_path: Optional path to configuration file
-    """
-    # Load configuration
-    try:
-        config = load_config(config_path)
-        set_config(config)
-        
-        # Update logging level based on configuration
-        log_level = getattr(logging, config.logging.level)
-        logger.setLevel(log_level)
-        logging.getLogger().setLevel(log_level)
-        
-        logger.info("Starting Statistical Analysis MCP server")
-        logger.info(f"Configuration loaded from: {config_path or 'defaults'}")
-        logger.info(f"Log level: {config.logging.level}")
-        
-        # Log configuration (excluding sensitive data)
-        if config_path:
-            logger.debug(f"Stats server: {config.server.stats.host}:{config.server.stats.port}")
-            logger.debug(f"Authentication: {'enabled' if config.authentication.enabled else 'disabled'}")
-            logger.debug(f"Rate limiting: {'enabled' if config.rate_limiting.enabled else 'disabled'}")
-            if config.rate_limiting.enabled:
-                logger.debug(f"Rate limit: {config.rate_limiting.requests_per_minute} req/min")
-        
-    except (FileNotFoundError, ValueError) as e:
-        logger.error(f"Configuration error: {e}")
-        logger.error("Server startup failed due to configuration errors")
-        sys.exit(1)
-    
-    # Run the server using stdio transport
-    # This will block until the server receives a shutdown signal
-    try:
-        async with stdio_server() as (read_stream, write_stream):
-            logger.info("Server started, waiting for requests...")
-            await app.run(
-                read_stream,
-                write_stream,
-                app.create_initialization_options()
-            )
-    except Exception as e:
-        logger.error(f"Server error: {e}", exc_info=True)
-        sys.exit(1)
-    
-    logger.info("Server shut down successfully")
-
-
-# Entry point when running as a script
-if __name__ == "__main__":
-    # Parse command-line arguments
-    parser = argparse.ArgumentParser(
-        description="Statistical Analysis MCP Server",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  # Run with default configuration (stdio mode)
-  python server.py
-  
-  # Run in HTTP mode
-  python server.py --transport http --host 0.0.0.0 --port 8001
-  
-  # Run in HTTP mode with hot-reload (development)
-  python server.py --transport http --host 0.0.0.0 --port 8001 --dev
-  
-  # Run with custom configuration file
-  python server.py --config /path/to/config.yaml
-  
-  # Run in HTTP mode with custom configuration
-  python server.py --transport http --host 127.0.0.1 --port 8081 --config config.yaml
-  
-  # Run with environment variable overrides
-  MCP_LOG_LEVEL=DEBUG python server.py --config config.yaml
-  
-Environment Variables:
-  MCP_STATS_HOST          Override stats server host
-  MCP_STATS_PORT          Override stats server port
-  MCP_AUTH_ENABLED        Enable/disable authentication (true/false)
-  MCP_API_KEY             Set API key
-  MCP_RATE_LIMIT_ENABLED  Enable/disable rate limiting (true/false)
-  MCP_RATE_LIMIT_RPM      Set requests per minute
-  MCP_LOG_LEVEL           Set logging level (DEBUG/INFO/WARNING/ERROR/CRITICAL)
-        """
-    )
-    parser.add_argument(
-        "--config",
-        type=str,
-        default=None,
-        help="Path to YAML configuration file (optional)"
-    )
-    parser.add_argument(
-        "--transport",
-        type=str,
-        choices=["stdio", "http"],
-        default="stdio",
-        help="Transport mode: stdio (default, for Claude Desktop) or http (for remote access)"
-    )
-    parser.add_argument(
-        "--host",
-        type=str,
-        default="0.0.0.0",
-        help="Host to bind to in HTTP mode (default: 0.0.0.0)"
-    )
-    parser.add_argument(
-        "--port",
-        type=int,
-        default=8001,
-        help="Port to bind to in HTTP mode (default: 8001)"
-    )
-    parser.add_argument(
-        "--dev",
-        action="store_true",
-        help="Enable development mode with hot-reload (HTTP mode only)"
-    )
-    
-    args = parser.parse_args()
-    
-    # Run the appropriate server mode
-    if args.transport == "http":
-        asyncio.run(run_http_server(args.host, args.port, args.config, args.dev))
-    else:
-        if args.dev:
-            logger.warning("--dev flag is only supported in HTTP mode, ignoring")
-        asyncio.run(run_stdio_server(args.config))
+]

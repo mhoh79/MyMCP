@@ -4,7 +4,8 @@ on:
   push:
     branches: [ main, develop ]
     paths:
-      - 'src/math_server/**'
+      - 'src/builtin/math_server/**'
+      - 'src/core/**'
       - 'src/middleware.py'
       - 'src/config.py'
       - 'tests/test_http_client.py'
@@ -13,7 +14,8 @@ on:
   pull_request:
     branches: [ main, develop ]
     paths:
-      - 'src/math_server/**'
+      - 'src/builtin/math_server/**'
+      - 'src/core/**'
       - 'src/middleware.py'
       - 'src/config.py'
       - 'tests/test_http_client.py'
@@ -62,7 +64,7 @@ jobs:
 
           authentication:
             enabled: false
-            api_key: "not-required"
+            api_key: "test-key-not-used-auth-disabled-12345"
 
           rate_limiting:
             enabled: false
@@ -74,7 +76,7 @@ jobs:
       
       - name: Start MCP HTTP server
         run: |
-          python src/math_server/server.py --transport http --host 127.0.0.1 --port 8000 --config config-test-no-auth.yaml &
+          python -m src.builtin.math_server --transport http --host 127.0.0.1 --port 8000 --config config-test-no-auth.yaml > server.log 2>&1 &
           SERVER_PID=$!
           echo "SERVER_PID=$SERVER_PID" >> $GITHUB_ENV
           
@@ -87,6 +89,8 @@ jobs:
             fi
             if [ $i -eq 30 ]; then
               echo "Server failed to start within 30 seconds"
+              echo "=== Server Log ==="
+              cat server.log || true
               exit 1
             fi
             echo "Waiting... ($i/30)"
@@ -113,6 +117,12 @@ jobs:
           flags: http-client-tests
           name: codecov-http-client
         if: matrix.python-version == '3.12'
+      
+      - name: Show server logs on failure
+        if: failure()
+        run: |
+          echo "=== Server Log ==="
+          cat server.log || true
       
       - name: Stop server
         if: always()
@@ -169,7 +179,7 @@ jobs:
       
       - name: Start MCP HTTP server with authentication
         run: |
-          python src/math_server/server.py --transport http --host 127.0.0.1 --port 8000 --config config-test-auth.yaml &
+          python -m src.builtin.math_server --transport http --host 127.0.0.1 --port 8000 --config config-test-auth.yaml > server-auth.log 2>&1 &
           SERVER_PID=$!
           echo "SERVER_PID=$SERVER_PID" >> $GITHUB_ENV
           
@@ -182,6 +192,8 @@ jobs:
             fi
             if [ $i -eq 30 ]; then
               echo "Server failed to start within 30 seconds"
+              echo "=== Server Log ==="
+              cat server-auth.log || true
               exit 1
             fi
             sleep 1
@@ -194,6 +206,12 @@ jobs:
         run: |
           # Run only authentication-related tests
           pytest tests/test_http_client.py -v -k "auth" --tb=short
+      
+      - name: Show server logs on failure
+        if: failure()
+        run: |
+          echo "=== Server Log ==="
+          cat server-auth.log || true
       
       - name: Stop server
         if: always()
@@ -250,7 +268,7 @@ jobs:
       
       - name: Start MCP HTTP server with rate limiting
         run: |
-          python src/math_server/server.py --transport http --host 127.0.0.1 --port 8000 --config config-test-ratelimit.yaml &
+          python -m src.builtin.math_server --transport http --host 127.0.0.1 --port 8000 --config config-test-ratelimit.yaml > server-ratelimit.log 2>&1 &
           SERVER_PID=$!
           echo "SERVER_PID=$SERVER_PID" >> $GITHUB_ENV
           
@@ -263,6 +281,8 @@ jobs:
             fi
             if [ $i -eq 30 ]; then
               echo "Server failed to start within 30 seconds"
+              echo "=== Server Log ==="
+              cat server-ratelimit.log || true
               exit 1
             fi
             sleep 1
@@ -274,6 +294,12 @@ jobs:
         run: |
           # Run rate limit tests
           pytest tests/test_http_client.py -v -k "rate_limit" --tb=short
+      
+      - name: Show server logs on failure
+        if: failure()
+        run: |
+          echo "=== Server Log ==="
+          cat server-ratelimit.log || true
       
       - name: Stop server
         if: always()
