@@ -2095,15 +2095,6 @@ def encode_decode(text: str, operation: str, format: str) -> str:
         raise ValueError(f"Failed to {operation} text using {format} format: {str(e)}")
 
 
-# ============================================================================
-# MCP Server Implementation
-# ============================================================================
-
-
-# Initialize the MCP server with a descriptive name
-app = Server("math-calculator")
-
-
 async def handle_fibonacci(arguments: Any) -> CallToolResult:
     """Handle calculate_fibonacci tool calls."""
     # Extract and validate parameters
@@ -3827,6 +3818,217 @@ async def handle_word_frequency(arguments: Any) -> CallToolResult:
             isError=True,
         )
     
+    # Analyze word frequency
+    try:
+        logger.info(f"Analyzing word frequency (top {top_n}, skip_common={skip_common})")
+        result = word_frequency(text, top_n, skip_common)
+        
+        # Format the result
+        result_text = f"Word Frequency Analysis:\n\n"
+        result_text += f"Top {min(top_n, len(result))} most frequent words:\n\n"
+        
+        for i, (word, count) in enumerate(result, 1):
+            result_text += f"{i}. '{word}': {count} occurrence{'s' if count != 1 else ''}\n"
+        
+        if skip_common:
+            result_text += "\n(Common English words were filtered out)"
+        
+        logger.info(f"Found {len(result)} words in frequency analysis")
+        
+        return CallToolResult(
+            content=[TextContent(type="text", text=result_text)],
+            isError=False,
+        )
+        
+    except ValueError as e:
+        logger.error(f"Word frequency error: {e}")
+        return CallToolResult(
+            content=[TextContent(type="text", text=f"Word frequency error: {str(e)}")],
+            isError=True,
+        )
+
+
+async def handle_text_transform(arguments: Any) -> CallToolResult:
+    """Handle text_transform tool calls."""
+    # Extract and validate parameters
+    text = arguments.get("text")
+    operation = arguments.get("operation")
+    
+    # Validate required parameters
+    if text is None:
+        logger.error("Missing required parameter: text")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text="Missing required parameter 'text'"
+            )],
+            isError=True,
+        )
+    
+    if operation is None:
+        logger.error("Missing required parameter: operation")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text="Missing required parameter 'operation'"
+            )],
+            isError=True,
+        )
+    
+    # Validate parameter types
+    if not isinstance(text, str):
+        logger.error(f"Invalid parameter type for text: {type(text)}")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=f"Parameter 'text' must be a string, got {type(text).__name__}"
+            )],
+            isError=True,
+        )
+    
+    if not isinstance(operation, str):
+        logger.error(f"Invalid parameter type for operation: {type(operation)}")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=f"Parameter 'operation' must be a string, got {type(operation).__name__}"
+            )],
+            isError=True,
+        )
+    
+    # Transform text
+    try:
+        logger.info(f"Transforming text using operation: {operation}")
+        result = text_transform(text, operation)
+        
+        # Format the result
+        result_text = (
+            f"Text Transformation:\n\n"
+            f"Operation: {operation}\n"
+            f"Original: {text[:100]}{'...' if len(text) > 100 else ''}\n\n"
+            f"Result:\n{result}"
+        )
+        
+        logger.info(f"Text transformed successfully using {operation}")
+        
+        return CallToolResult(
+            content=[TextContent(type="text", text=result_text)],
+            isError=False,
+        )
+        
+    except ValueError as e:
+        logger.error(f"Text transform error: {e}")
+        return CallToolResult(
+            content=[TextContent(type="text", text=f"Text transform error: {str(e)}")],
+            isError=True,
+        )
+
+
+async def handle_encode_decode(arguments: Any) -> CallToolResult:
+    """Handle encode_decode tool calls."""
+    # Extract and validate parameters
+    text = arguments.get("text")
+    operation = arguments.get("operation")
+    format_type = arguments.get("format")
+    
+    # Validate required parameters
+    if text is None:
+        logger.error("Missing required parameter: text")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text="Missing required parameter 'text'"
+            )],
+            isError=True,
+        )
+    
+    if operation is None:
+        logger.error("Missing required parameter: operation")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text="Missing required parameter 'operation'"
+            )],
+            isError=True,
+        )
+    
+    if format_type is None:
+        logger.error("Missing required parameter: format")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text="Missing required parameter 'format'"
+            )],
+            isError=True,
+        )
+    
+    # Validate parameter types
+    if not isinstance(text, str):
+        logger.error(f"Invalid parameter type for text: {type(text)}")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=f"Parameter 'text' must be a string, got {type(text).__name__}"
+            )],
+            isError=True,
+        )
+    
+    if not isinstance(operation, str):
+        logger.error(f"Invalid parameter type for operation: {type(operation)}")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=f"Parameter 'operation' must be a string, got {type(operation).__name__}"
+            )],
+            isError=True,
+        )
+    
+    if not isinstance(format_type, str):
+        logger.error(f"Invalid parameter type for format: {type(format_type)}")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=f"Parameter 'format' must be a string, got {type(format_type).__name__}"
+            )],
+            isError=True,
+        )
+    
+    # Encode or decode text
+    try:
+        logger.info(f"{operation.capitalize()}ing text using {format_type} format")
+        result = encode_decode(text, operation, format_type)
+        
+        # Format the result - show preview for long results
+        if len(result) > 200:
+            result_preview = result[:200] + "..."
+        else:
+            result_preview = result
+        
+        result_text = (
+            f"Text {operation.capitalize()}ing:\n\n"
+            f"Format: {format_type.upper()}\n"
+            f"Operation: {operation}\n"
+            f"Input length: {len(text)} characters\n"
+            f"Output length: {len(result)} characters\n\n"
+            f"Result:\n{result_preview}"
+        )
+        
+        if len(result) > 200:
+            result_text += f"\n\n(Showing first 200 characters of {len(result)} total)"
+        
+        logger.info(f"Successfully {operation}d text using {format_type}")
+        
+        return CallToolResult(
+            content=[TextContent(type="text", text=result_text)],
+            isError=False,
+        )
+        
+    except ValueError as e:
+        logger.error(f"Encode/decode error: {e}")
+        return CallToolResult(
+            content=[TextContent(type="text", text=f"Encode/decode error: {str(e)}")],
+            isError=True,
+        )
 
 
 # ============================================================================
@@ -4440,7 +4642,4 @@ MATH_TOOLS = [
                 "required": ["text", "operation", "format"],
             },
         ),
-    ]
-
-
 ]
