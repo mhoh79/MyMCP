@@ -28,19 +28,60 @@ echo ""
 echo "🚀 Starting Math Server on port 8000..."
 nohup python src/math_server/server.py --transport http --host 0.0.0.0 --port 8000 --config config.yaml > /tmp/math_server.log 2>&1 &
 MATH_PID=$!
-echo "✅ Math Server started (PID: $MATH_PID)"
+echo "   Process started (PID: $MATH_PID)"
 
 # Step 3: Start Stats Server (port 8001)
 echo "🚀 Starting Stats Server on port 8001..."
 nohup python src/stats_server/server.py --transport http --host 0.0.0.0 --port 8001 --config config.yaml > /tmp/stats_server.log 2>&1 &
 STATS_PID=$!
-echo "✅ Stats Server started (PID: $STATS_PID)"
+echo "   Process started (PID: $STATS_PID)"
 
 echo ""
 
-# Step 4: Wait a moment for servers to start
+# Step 4: Wait for servers to start and verify they're healthy
 echo "⏳ Waiting for servers to initialize..."
-sleep 3
+MATH_READY=false
+STATS_READY=false
+MAX_ATTEMPTS=30  # 30 seconds max wait time
+
+for i in $(seq 1 $MAX_ATTEMPTS); do
+    # Check if Math Server is ready
+    if [ "$MATH_READY" = false ] && curl -s http://localhost:8000/health > /dev/null 2>&1; then
+        MATH_READY=true
+        echo "✅ Math Server is healthy"
+    fi
+    
+    # Check if Stats Server is ready
+    if [ "$STATS_READY" = false ] && curl -s http://localhost:8001/health > /dev/null 2>&1; then
+        STATS_READY=true
+        echo "✅ Stats Server is healthy"
+    fi
+    
+    # Exit loop if both servers are ready
+    if [ "$MATH_READY" = true ] && [ "$STATS_READY" = true ]; then
+        break
+    fi
+    
+    sleep 1
+done
+
+# Check if servers started successfully
+if [ "$MATH_READY" = false ]; then
+    echo "⚠️  Math Server failed to start or is not responding"
+    echo "   Check logs: tail -f /tmp/math_server.log"
+fi
+
+if [ "$STATS_READY" = false ]; then
+    echo "⚠️  Stats Server failed to start or is not responding"
+    echo "   Check logs: tail -f /tmp/stats_server.log"
+fi
+
+# Exit if both servers failed
+if [ "$MATH_READY" = false ] && [ "$STATS_READY" = false ]; then
+    echo ""
+    echo "❌ Both servers failed to start. Please check the logs above."
+    exit 1
+fi
 
 # Step 5: Display public URLs
 echo ""

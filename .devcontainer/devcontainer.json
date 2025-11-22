@@ -14,7 +14,7 @@
       "visibility": "public"
     }
   },
-  "postCreateCommand": "pip install -r requirements.txt",
+  "postCreateCommand": "python -m pip install -r requirements.txt",
   "postStartCommand": "bash .devcontainer/startup.sh",
   "containerEnv": {
     "MCP_AUTH_ENABLED": "false",
