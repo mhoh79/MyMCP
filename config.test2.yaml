@@ -1,0 +1,42 @@
+# Test configuration with custom servers (some disabled)
+server:
+  math:
+    host: "0.0.0.0"
+    port: 8000
+  stats:
+    host: "0.0.0.0"
+    port: 8001
+  cors_origins:
+    - "http://localhost:*"
+    - "https://*.app.github.dev"
+
+authentication:
+  enabled: false
+  api_key: "test-api-key"
+
+rate_limiting:
+  enabled: false
+  requests_per_minute: 60
+
+logging:
+  level: "INFO"
+
+# Custom servers for testing
+custom_servers:
+  - name: test-server
+    module: custom.test_server.server
+    host: 0.0.0.0
+    port: 8002
+    enabled: true
+    
+  - name: disabled-server
+    module: custom.disabled_server.server
+    host: 0.0.0.0
+    port: 8003
+    enabled: false
+    
+  - name: another-server
+    module: custom.another_server.server
+    host: 0.0.0.0
+    port: 8004
+    enabled: true
