@@ -203,11 +203,66 @@ start_servers() {
         exit 1
     fi
 
+    # Start custom servers from config
+    echo ""
+    print_info "Starting Custom Servers (from config)..."
+    
+    # Use Python helper to extract custom server config
+    # Note: All values are validated by Pydantic Config class before output
+    # Safe for use in shell commands (names: alphanumeric+hyphens/underscores only,
+    # modules: valid Python identifiers only, ports: 1-65535, hosts: valid addresses)
+    CUSTOM_SERVERS=$(python3 get_custom_servers.py "$CONFIG_FILE" 2>/dev/null)
+    
+    if [ -n "$CUSTOM_SERVERS" ]; then
+        CUSTOM_COUNT=0
+        while IFS='|' read -r name module host port; do
+            print_info "Starting Custom Server '$name' on port $port..."
+            
+            # Check if port is available
+            if port_in_use $port; then
+                print_error "Port $port is already in use. Cannot start custom server '$name'."
+                continue
+            fi
+            
+            # Build command with optional --dev flag
+            CUSTOM_CMD="python3 -m $module --transport http --host $host --port $port --config \"$CONFIG_FILE\""
+            if [ "$DEV_MODE" = true ]; then
+                CUSTOM_CMD="$CUSTOM_CMD --dev"
+            fi
+            
+            nohup bash -c "$CUSTOM_CMD" > "logs/custom_${name}.log" 2>&1 &
+            CUSTOM_PID=$!
+            sleep 2
+            
+            if is_running $CUSTOM_PID; then
+                print_status "Custom Server '$name' started on port $port (PID: $CUSTOM_PID)"
+                echo "custom_${name}=$CUSTOM_PID" >> "$PIDS_FILE"
+                CUSTOM_COUNT=$((CUSTOM_COUNT + 1))
+            else
+                print_warning "Failed to start Custom Server '$name'. Check logs/custom_${name}.log for details."
+            fi
+        done <<< "$CUSTOM_SERVERS"
+        
+        if [ $CUSTOM_COUNT -gt 0 ]; then
+            print_status "Started $CUSTOM_COUNT custom server(s)"
+        fi
+    else
+        print_info "No custom servers configured"
+    fi
+
     # Display connection URLs
     echo ""
     echo -e "${BLUE}📡 Connection URLs:${NC}"
     echo "  Math Server:  http://localhost:$MATH_PORT"
     echo "  Stats Server: http://localhost:$STATS_PORT"
+    
+    # Display custom server URLs
+    if [ -n "$CUSTOM_SERVERS" ]; then
+        while IFS='|' read -r name module host port; do
+            echo "  $name:  http://localhost:$port"
+        done <<< "$CUSTOM_SERVERS"
+    fi
+    
     echo ""
 
     # Display Codespaces URLs if applicable

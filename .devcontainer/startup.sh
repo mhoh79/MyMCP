@@ -94,6 +94,46 @@ echo "     Process started (PID: $STATS_PROD_PID)"
 
 echo ""
 
+# Step 4.5: Start CUSTOM servers from config.yaml (if any)
+if [ "$ENVIRONMENT" = "codespace" ]; then
+    echo "🔧 Starting CUSTOM servers (from config.yaml)..."
+    echo ""
+    
+    # Use Python helper to extract custom server config
+    # Note: All values are validated by Pydantic Config class before output
+    # Safe for use in shell commands (validated names, modules, ports, hosts)
+    CUSTOM_SERVERS=$(python3 get_custom_servers.py config.yaml 2>/dev/null)
+    
+    if [ -n "$CUSTOM_SERVERS" ]; then
+        # Array to track custom server PIDs and info
+        declare -a CUSTOM_SERVER_PIDS=()
+        declare -a CUSTOM_SERVER_NAMES=()
+        declare -a CUSTOM_SERVER_PORTS=()
+        
+        # Read custom servers and start each one
+        while IFS='|' read -r name module host port; do
+            echo "  🚀 Custom Server '$name' on port $port..."
+            
+            # Start custom server (module path already includes 'src.' prefix from helper)
+            MCP_AUTH_ENABLED=false nohup python3 -m "$module" --transport http --host "$host" --port "$port" --config config.yaml > "/tmp/custom_${name}.log" 2>&1 &
+            CUSTOM_PID=$!
+            
+            # Track PID, name, and port
+            CUSTOM_SERVER_PIDS+=($CUSTOM_PID)
+            CUSTOM_SERVER_NAMES+=("$name")
+            CUSTOM_SERVER_PORTS+=($port)
+            
+            echo "     Process started (PID: $CUSTOM_PID)"
+        done <<< "$CUSTOM_SERVERS"
+        
+        echo ""
+        echo "  ✅ Started ${#CUSTOM_SERVER_PIDS[@]} custom server(s)"
+    else
+        echo "  ℹ️  No custom servers configured"
+    fi
+    echo ""
+fi
+
 # Step 5: Wait for servers to start and verify they're healthy
 echo ""
 echo "⏳ Waiting for servers to initialize..."
@@ -102,6 +142,14 @@ STATS_DEV_READY=false
 MATH_PROD_READY=false
 STATS_PROD_READY=false
 MAX_ATTEMPTS=30  # 30 seconds max wait time
+
+# Initialize custom server health status array
+if [ "$ENVIRONMENT" = "codespace" ] && [ -n "$CUSTOM_SERVERS" ]; then
+    declare -a CUSTOM_SERVER_READY=()
+    for _ in "${CUSTOM_SERVER_NAMES[@]}"; do
+        CUSTOM_SERVER_READY+=(false)
+    done
+fi
 
 for _ in $(seq 1 $MAX_ATTEMPTS); do
     # Check DEV servers
@@ -126,8 +174,34 @@ for _ in $(seq 1 $MAX_ATTEMPTS); do
         echo "✅ Stats Server (Prod) is healthy"
     fi
     
+    # Check CUSTOM servers (if any)
+    if [ "$ENVIRONMENT" = "codespace" ] && [ -n "$CUSTOM_SERVERS" ]; then
+        for i in "${!CUSTOM_SERVER_NAMES[@]}"; do
+            if [ "${CUSTOM_SERVER_READY[$i]}" = false ] && curl -s "http://localhost:${CUSTOM_SERVER_PORTS[$i]}/health" > /dev/null 2>&1; then
+                CUSTOM_SERVER_READY[$i]=true
+                echo "✅ Custom Server '${CUSTOM_SERVER_NAMES[$i]}' is healthy"
+            fi
+        done
+    fi
+    
+    # Check if all servers are ready
+    ALL_READY=true
+    if [ "$MATH_DEV_READY" = false ] || [ "$STATS_DEV_READY" = false ] || [ "$MATH_PROD_READY" = false ] || [ "$STATS_PROD_READY" = false ]; then
+        ALL_READY=false
+    fi
+    
+    # Check custom servers
+    if [ "$ENVIRONMENT" = "codespace" ] && [ -n "$CUSTOM_SERVERS" ]; then
+        for ready in "${CUSTOM_SERVER_READY[@]}"; do
+            if [ "$ready" = false ]; then
+                ALL_READY=false
+                break
+            fi
+        done
+    fi
+    
     # Exit loop if all servers are ready
-    if [ "$MATH_DEV_READY" = true ] && [ "$STATS_DEV_READY" = true ] && [ "$MATH_PROD_READY" = true ] && [ "$STATS_PROD_READY" = true ]; then
+    if [ "$ALL_READY" = true ]; then
         break
     fi
     
@@ -156,8 +230,33 @@ if [ "$STATS_PROD_READY" = false ]; then
     echo "   Check logs: tail -f /tmp/stats_server_prod.log"
 fi
 
+# Report custom server status
+if [ "$ENVIRONMENT" = "codespace" ] && [ -n "$CUSTOM_SERVERS" ]; then
+    for i in "${!CUSTOM_SERVER_NAMES[@]}"; do
+        if [ "${CUSTOM_SERVER_READY[$i]}" = false ]; then
+            echo "⚠️  Custom Server '${CUSTOM_SERVER_NAMES[$i]}' failed to start or is not responding"
+            echo "   Check logs: tail -f /tmp/custom_${CUSTOM_SERVER_NAMES[$i]}.log"
+        fi
+    done
+fi
+
 # Exit if all servers failed
-if [ "$MATH_DEV_READY" = false ] && [ "$STATS_DEV_READY" = false ] && [ "$MATH_PROD_READY" = false ] && [ "$STATS_PROD_READY" = false ]; then
+ALL_FAILED=true
+if [ "$MATH_DEV_READY" = true ] || [ "$STATS_DEV_READY" = true ] || [ "$MATH_PROD_READY" = true ] || [ "$STATS_PROD_READY" = true ]; then
+    ALL_FAILED=false
+fi
+
+# Check if any custom server succeeded
+if [ "$ENVIRONMENT" = "codespace" ] && [ -n "$CUSTOM_SERVERS" ]; then
+    for ready in "${CUSTOM_SERVER_READY[@]}"; do
+        if [ "$ready" = true ]; then
+            ALL_FAILED=false
+            break
+        fi
+    done
+fi
+
+if [ "$ALL_FAILED" = true ]; then
     echo ""
     echo "❌ All servers failed to start. Please check the logs above."
     exit 1
@@ -183,6 +282,17 @@ if [ -n "$CODESPACE_NAME" ]; then
     echo "   Visibility:   Public"
     echo "   Auth Header:  Authorization: Bearer <api-key>"
     echo ""
+    
+    # Display custom server URLs
+    if [ "$ENVIRONMENT" = "codespace" ] && [ -n "$CUSTOM_SERVERS" ]; then
+        echo "🔧 CUSTOM Servers (No Authentication):"
+        for i in "${!CUSTOM_SERVER_NAMES[@]}"; do
+            echo "   ${CUSTOM_SERVER_NAMES[$i]}:  https://${CODESPACE_NAME}-${CUSTOM_SERVER_PORTS[$i]}.app.github.dev"
+        done
+        echo "   Visibility:   Private"
+        echo ""
+    fi
+    
     echo "🌐 Codespace Environment Detected"
 else
     echo "🔓 DEV Servers (No Authentication):"
@@ -194,6 +304,16 @@ else
     echo "   Stats Server: http://localhost:9001"
     echo "   Auth Header:  Authorization: Bearer <api-key>"
     echo ""
+    
+    # Display custom server URLs
+    if [ "$ENVIRONMENT" = "codespace" ] && [ -n "$CUSTOM_SERVERS" ]; then
+        echo "🔧 CUSTOM Servers (No Authentication):"
+        for i in "${!CUSTOM_SERVER_NAMES[@]}"; do
+            echo "   ${CUSTOM_SERVER_NAMES[$i]}:  http://localhost:${CUSTOM_SERVER_PORTS[$i]}"
+        done
+        echo ""
+    fi
+    
     echo "ℹ️  Running in local environment (not Codespaces)"
 fi
 
@@ -209,12 +329,28 @@ echo "    - Stats Server: /tmp/stats_server_dev.log"
 echo "  PROD:"
 echo "    - Math Server:  /tmp/math_server_prod.log"
 echo "    - Stats Server: /tmp/stats_server_prod.log"
+
+# Add custom server logs
+if [ "$ENVIRONMENT" = "codespace" ] && [ -n "$CUSTOM_SERVERS" ]; then
+    echo "  CUSTOM:"
+    for i in "${!CUSTOM_SERVER_NAMES[@]}"; do
+        echo "    - ${CUSTOM_SERVER_NAMES[$i]}:  /tmp/custom_${CUSTOM_SERVER_NAMES[$i]}.log"
+    done
+fi
+
 echo ""
 echo "View logs with:"
 echo "  tail -f /tmp/math_server_dev.log"
 echo "  tail -f /tmp/stats_server_dev.log"
 echo "  tail -f /tmp/math_server_prod.log"
 echo "  tail -f /tmp/stats_server_prod.log"
+
+# Add custom server log commands
+if [ "$ENVIRONMENT" = "codespace" ] && [ -n "$CUSTOM_SERVERS" ]; then
+    for i in "${!CUSTOM_SERVER_NAMES[@]}"; do
+        echo "  tail -f /tmp/custom_${CUSTOM_SERVER_NAMES[$i]}.log"
+    done
+fi
 echo ""
 echo "Test authentication:"
 if [ -n "$CODESPACE_NAME" ]; then

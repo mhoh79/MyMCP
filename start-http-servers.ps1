@@ -331,6 +331,75 @@ function Start-Servers {
         exit 1
     }
 
+    # Start custom servers from config
+    Write-Host ""
+    Write-Info "Starting Custom Servers (from config)..."
+    
+    # Use Python helper to extract custom server config
+    # Note: All values are validated by Pydantic Config class before output
+    # Safe for use in commands (validated names, modules, ports, hosts)
+    $customServersOutput = & $pythonCmd get_custom_servers.py $ConfigFile 2>$null
+    
+    if ($customServersOutput) {
+        $customCount = 0
+        foreach ($line in $customServersOutput) {
+            $parts = $line -split '\|'
+            if ($parts.Length -eq 4) {
+                $customName = $parts[0]
+                $customModule = $parts[1]
+                $customHost = $parts[2]
+                $customPort = [int]$parts[3]
+                
+                Write-Info "Starting Custom Server '$customName' on port $customPort..."
+                
+                # Check if port is available
+                if (Test-PortInUse $customPort) {
+                    Write-Error-Custom "Port $customPort is already in use. Cannot start custom server '$customName'."
+                    continue
+                }
+                
+                # Build argument list with optional --dev flag
+                # Module path already includes 'src.' prefix from helper
+                $customArgs = @("-m", $customModule, "--transport", "http", "--host", $customHost, "--port", $customPort, "--config", $ConfigFile)
+                if ($DevMode) {
+                    $customArgs += "--dev"
+                }
+                
+                $startProcessParams = @{
+                    FilePath = $pythonCmd
+                    ArgumentList = $customArgs
+                    RedirectStandardOutput = "logs/custom_$customName.log"
+                    RedirectStandardError = "logs/custom_${customName}_error.log"
+                    PassThru = $true
+                }
+                
+                # Add WindowStyle only on Windows
+                if ($IsWindows -or $null -eq $IsWindows) {
+                    $startProcessParams['WindowStyle'] = 'Hidden'
+                }
+                
+                $customProcess = Start-Process @startProcessParams
+                Start-Sleep -Seconds 2
+                
+                if (Test-ProcessRunning $customProcess.Id) {
+                    Write-Status "Custom Server '$customName' started on port $customPort (PID: $($customProcess.Id))"
+                    $pids["custom_$customName"] = $customProcess.Id
+                    $customCount++
+                }
+                else {
+                    Write-Warning-Custom "Failed to start Custom Server '$customName'. Check logs/custom_${customName}_error.log for details."
+                }
+            }
+        }
+        
+        if ($customCount -gt 0) {
+            Write-Status "Started $customCount custom server(s)"
+        }
+    }
+    else {
+        Write-Info "No custom servers configured"
+    }
+
     # Save PIDs to file
     Write-PidsFile $pids
 
@@ -339,6 +408,19 @@ function Start-Servers {
     Write-Host "📡 Connection URLs:" -ForegroundColor Blue
     Write-Host "  Math Server:  http://localhost:$MathPort"
     Write-Host "  Stats Server: http://localhost:$StatsPort"
+    
+    # Display custom server URLs
+    if ($customServersOutput) {
+        foreach ($line in $customServersOutput) {
+            $parts = $line -split '\|'
+            if ($parts.Length -eq 4) {
+                $customName = $parts[0]
+                $customPort = $parts[3]
+                Write-Host "  $customName`:  http://localhost:$customPort"
+            }
+        }
+    }
+    
     Write-Host ""
 
     # Display Codespaces URLs if applicable
@@ -348,12 +430,37 @@ function Start-Servers {
         if ($codespace -eq "YOUR-CODESPACE") {
             Write-Host "  Math Server:  https://YOUR-CODESPACE-$MathPort.app.github.dev"
             Write-Host "  Stats Server: https://YOUR-CODESPACE-$StatsPort.app.github.dev"
+            
+            # Display custom server Codespaces URLs
+            if ($customServersOutput) {
+                foreach ($line in $customServersOutput) {
+                    $parts = $line -split '\|'
+                    if ($parts.Length -eq 4) {
+                        $customName = $parts[0]
+                        $customPort = $parts[3]
+                        Write-Host "  $customName`:  https://YOUR-CODESPACE-$customPort.app.github.dev"
+                    }
+                }
+            }
+            
             Write-Host ""
             Write-Info "Replace YOUR-CODESPACE with your actual Codespace name"
         }
         else {
             Write-Host "  Math Server:  https://$codespace-$MathPort.app.github.dev"
             Write-Host "  Stats Server: https://$codespace-$StatsPort.app.github.dev"
+            
+            # Display custom server Codespaces URLs
+            if ($customServersOutput) {
+                foreach ($line in $customServersOutput) {
+                    $parts = $line -split '\|'
+                    if ($parts.Length -eq 4) {
+                        $customName = $parts[0]
+                        $customPort = $parts[3]
+                        Write-Host "  $customName`:  https://$codespace-$customPort.app.github.dev"
+                    }
+                }
+            }
         }
         Write-Host ""
     }
