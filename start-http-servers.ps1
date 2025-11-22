@@ -336,6 +336,8 @@ function Start-Servers {
     Write-Info "Starting Custom Servers (from config)..."
     
     # Use Python helper to extract custom server config
+    # Note: All values are validated by Pydantic Config class before output
+    # Safe for use in commands (validated names, modules, ports, hosts)
     $customServersOutput = & $pythonCmd get_custom_servers.py $ConfigFile 2>$null
     
     if ($customServersOutput) {
@@ -356,12 +358,8 @@ function Start-Servers {
                     continue
                 }
                 
-                # Prepend 'src.' if not already present
-                if (-not $customModule.StartsWith("src.")) {
-                    $customModule = "src.$customModule"
-                }
-                
                 # Build argument list with optional --dev flag
+                # Module path already includes 'src.' prefix from helper
                 $customArgs = @("-m", $customModule, "--transport", "http", "--host", $customHost, "--port", $customPort, "--config", $ConfigFile)
                 if ($DevMode) {
                     $customArgs += "--dev"

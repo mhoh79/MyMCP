@@ -208,6 +208,9 @@ start_servers() {
     print_info "Starting Custom Servers (from config)..."
     
     # Use Python helper to extract custom server config
+    # Note: All values are validated by Pydantic Config class before output
+    # Safe for use in shell commands (names: alphanumeric+hyphens/underscores only,
+    # modules: valid Python identifiers only, ports: 1-65535, hosts: valid addresses)
     CUSTOM_SERVERS=$(python3 get_custom_servers.py "$CONFIG_FILE" 2>/dev/null)
     
     if [ -n "$CUSTOM_SERVERS" ]; then
@@ -222,10 +225,6 @@ start_servers() {
             fi
             
             # Build command with optional --dev flag
-            # Prepend 'src.' if not already present
-            if [[ ! "$module" =~ ^src\. ]]; then
-                module="src.$module"
-            fi
             CUSTOM_CMD="python3 -m $module --transport http --host $host --port $port --config \"$CONFIG_FILE\""
             if [ "$DEV_MODE" = true ]; then
                 CUSTOM_CMD="$CUSTOM_CMD --dev"

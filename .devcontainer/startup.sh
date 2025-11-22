@@ -100,6 +100,8 @@ if [ "$ENVIRONMENT" = "codespace" ]; then
     echo ""
     
     # Use Python helper to extract custom server config
+    # Note: All values are validated by Pydantic Config class before output
+    # Safe for use in shell commands (validated names, modules, ports, hosts)
     CUSTOM_SERVERS=$(python3 get_custom_servers.py config.yaml 2>/dev/null)
     
     if [ -n "$CUSTOM_SERVERS" ]; then
@@ -112,12 +114,7 @@ if [ "$ENVIRONMENT" = "codespace" ]; then
         while IFS='|' read -r name module host port; do
             echo "  🚀 Custom Server '$name' on port $port..."
             
-            # Prepend 'src.' if not already present
-            if [[ ! "$module" =~ ^src\. ]]; then
-                module="src.$module"
-            fi
-            
-            # Start custom server
+            # Start custom server (module path already includes 'src.' prefix from helper)
             MCP_AUTH_ENABLED=false nohup python3 -m "$module" --transport http --host "$host" --port "$port" --config config.yaml > "/tmp/custom_${name}.log" 2>&1 &
             CUSTOM_PID=$!
             
