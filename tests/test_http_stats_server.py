@@ -15,7 +15,6 @@ Tests cover:
 
 import asyncio
 import os
-import json
 import time
 from typing import Any, Dict, Optional
 from urllib.parse import urljoin
@@ -792,8 +791,6 @@ async def test_stats_metrics_endpoint(stats_client):
 @pytest.mark.asyncio
 async def test_stats_invalid_json_rpc(stats_client):
     """Test invalid JSON-RPC request."""
-    url = urljoin(SERVER_URL, "/messages")
-    
     # Send invalid JSON-RPC (missing version)
     response = await stats_client.make_request("POST", "/messages", json={
         "method": "tools/list",
