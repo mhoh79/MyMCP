@@ -49,7 +49,7 @@ class AuthenticationConfig(BaseModel):
     
     @field_validator("api_key")
     @classmethod
-    def validate_api_key(cls, v: str, info) -> str:
+    def validate_api_key(cls, v: str, info: Any) -> str:
         """Validate API key when authentication is enabled."""
         # Get the enabled value from the validation context
         if info.data.get("enabled", False):

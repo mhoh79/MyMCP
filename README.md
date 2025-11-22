@@ -97,7 +97,75 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 2. Test the Servers
+### 2. Configuration (Optional)
+
+The servers support YAML-based configuration with environment variable overrides. By default, servers run with sensible defaults, but you can customize settings using a config file.
+
+#### Configuration File
+
+Create or modify `config.yaml` in the project root (see `config.example.yaml` for all options):
+
+```yaml
+server:
+  math:
+    host: "0.0.0.0"
+    port: 8000
+  stats:
+    host: "0.0.0.0"
+    port: 8001
+  cors_origins:
+    - "http://localhost:*"
+    - "https://*.app.github.dev"
+
+authentication:
+  enabled: false
+  api_key: "your-secret-api-key-here"
+
+rate_limiting:
+  enabled: false
+  requests_per_minute: 60
+
+logging:
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+```
+
+#### Environment Variables
+
+Override any config value using environment variables with the `MCP_` prefix:
+
+```bash
+# Server settings
+export MCP_MATH_PORT=9000
+export MCP_STATS_PORT=9001
+
+# Authentication
+export MCP_AUTH_ENABLED=true
+export MCP_API_KEY="my-secure-api-key-1234567890"
+
+# Rate limiting
+export MCP_RATE_LIMIT_ENABLED=true
+export MCP_RATE_LIMIT_RPM=120
+
+# Logging
+export MCP_LOG_LEVEL=DEBUG
+```
+
+#### Using Configuration
+
+Run servers with configuration:
+
+```bash
+# With config file
+python src/math_server/server.py --config config.yaml
+
+# With environment overrides
+MCP_LOG_LEVEL=DEBUG python src/stats_server/server.py --config config.yaml
+
+# Without config (uses defaults)
+python src/math_server/server.py
+```
+
+### 3. Test the Servers
 
 Run each server directly to verify they work:
 
@@ -107,9 +175,19 @@ python src/math_server/server.py
 
 # Test Statistical Analysis Server (in a new terminal)
 python src/stats_server/server.py
+
+# Test with configuration
+python src/math_server/server.py --config config.yaml
 ```
 
 Each server will start and wait for MCP protocol messages on stdin. Press `Ctrl+C` to stop.
+
+To validate your configuration:
+
+```bash
+# Run the configuration test suite
+python test_config.py
+```
 
 ### 3. Configure with Claude Desktop
 
@@ -144,7 +222,34 @@ Add **both servers** to Claude Desktop's configuration file:
 - Use absolute paths for both the Python executable and server scripts
 - You can configure either or both servers based on your needs
 
-### 4. Restart Claude Desktop
+**With Configuration File:**
+
+To use a configuration file with Claude Desktop, add the `--config` argument:
+
+```json
+{
+  "mcpServers": {
+    "math-tools": {
+      "command": "c:/Users/YOUR_USERNAME/path/to/MyMCP/venv/Scripts/python.exe",
+      "args": [
+        "c:/Users/YOUR_USERNAME/path/to/MyMCP/src/math_server/server.py",
+        "--config",
+        "c:/Users/YOUR_USERNAME/path/to/MyMCP/config.yaml"
+      ]
+    },
+    "stats-tools": {
+      "command": "c:/Users/YOUR_USERNAME/path/to/MyMCP/venv/Scripts/python.exe",
+      "args": [
+        "c:/Users/YOUR_USERNAME/path/to/MyMCP/src/stats_server/server.py",
+        "--config",
+        "c:/Users/YOUR_USERNAME/path/to/MyMCP/config.yaml"
+      ]
+    }
+  }
+}
+```
+
+### 5. Restart Claude Desktop
 
 Completely quit Claude Desktop and restart it. Both servers should now be available with their respective tools.
 
@@ -1347,11 +1452,13 @@ Look for messages containing "fibonacci", "prime", or "mcp" to see connection at
 
 ## 📚 Dependencies
 
-- `mcp>=1.0.0` - Model Context Protocol SDK
+- `mcp>=1.10.0` - Model Context Protocol SDK
 - `pydantic>=2.0.0` - Data validation and settings management
+- `pydantic-settings>=2.0.0` - Settings management with environment variable support
+- `pyyaml>=6.0` - YAML configuration file parsing
 - `python-dotenv>=1.0.0` - Environment variable management
 - `python-dateutil>=2.8.0` - Date and time calculations with timezone support
-- `scipy>=1.10.0` - Scientific computing library for statistical tests (Shapiro-Wilk, Durbin-Watson, VIF)
+- `scipy>=1.11.0` - Scientific computing library for statistical tests (Shapiro-Wilk, Durbin-Watson, VIF)
 
 All dependencies are automatically installed via `pip install -r requirements.txt`.
 

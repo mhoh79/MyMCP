@@ -32,12 +32,12 @@ from mcp.types import (
 )
 
 # Import configuration module
-try:
-    from config import load_config, Config
-except ImportError:
-    # Handle relative import for running from different locations
-    sys.path.insert(0, str(Path(__file__).parent.parent))
-    from config import load_config, Config
+# Add parent directory to path to import config module
+_parent_dir = Path(__file__).parent.parent
+if str(_parent_dir) not in sys.path:
+    sys.path.insert(0, str(_parent_dir))
+
+from config import load_config, Config
 
 # Configure logging to stderr (stdout is reserved for MCP protocol messages)
 # Note: Log level will be updated based on config in main()
