@@ -1214,6 +1214,141 @@ Metrics:
 https://jubilant-space-waddle-5p4v997xqw5h555-8000.app.github.dev/metrics
 ```
 
+### Dual-Endpoint Architecture in Codespaces
+
+The repository includes a **dual-endpoint architecture** that runs both development and production-mode servers simultaneously in the same Codespace. This allows you to test both configurations side-by-side.
+
+#### Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│              GitHub Codespaces - Dual Endpoint Architecture         │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  ┌────────────────────────────┐  ┌───────────────────────────────┐ │
+│  │   DEV Endpoints (8000-8001) │  │  PROD Endpoints (9000-9001)   │ │
+│  │   ❌ No Authentication       │  │  ✅ Authentication Required   │ │
+│  │   🔒 Private Visibility      │  │  🌐 Public Visibility         │ │
+│  │   📝 Debug Logging           │  │  📊 Info Logging              │ │
+│  ├────────────────────────────┤  ├───────────────────────────────┤ │
+│  │                            │  │                               │ │
+│  │  Port 8000: Math Server    │  │  Port 9000: Math Server       │ │
+│  │  Port 8001: Stats Server   │  │  Port 9001: Stats Server      │ │
+│  │                            │  │                               │ │
+│  │  Config: config.dev.yaml   │  │  Config: config.prod.yaml     │ │
+│  │  Auth: MCP_AUTH_ENABLED=   │  │  Auth: MCP_AUTH_ENABLED=true  │ │
+│  │        false               │  │  Key:  $MCP_API_KEY           │ │
+│  │                            │  │                               │ │
+│  │  Use Case:                 │  │  Use Case:                    │ │
+│  │  • Quick testing           │  │  • Demo authentication        │ │
+│  │  • Development             │  │  • Production simulation      │ │
+│  │  • Debugging               │  │  • Security testing           │ │
+│  │  • Private access via      │  │  • Public API demo            │ │
+│  │    'gh codespace ports     │  │  • Client integration         │ │
+│  │     forward'               │  │                               │ │
+│  └────────────────────────────┘  └───────────────────────────────┘ │
+│                                                                     │
+│  All 4 servers start automatically via .devcontainer/startup.sh    │
+│  Health checks verify all instances before startup completes       │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+#### Server Endpoints
+
+**Development Servers (No Auth)**:
+- Math Server: `https://<codespace-name>-8000.app.github.dev`
+- Stats Server: `https://<codespace-name>-8001.app.github.dev`
+- Visibility: **Private** (requires `gh codespace ports forward` for access)
+- Authentication: **Disabled**
+- Config: `config.dev.yaml`
+
+**Production Servers (Auth Required)**:
+- Math Server: `https://<codespace-name>-9000.app.github.dev`
+- Stats Server: `https://<codespace-name>-9001.app.github.dev`
+- Visibility: **Public** (accessible via URL)
+- Authentication: **Enabled** (Bearer token required)
+- Config: `config.prod.yaml`
+
+#### Testing Development Endpoints
+
+```bash
+# Direct access (no authentication needed)
+curl https://<codespace-name>-8000.app.github.dev/health
+
+# Test a tool
+curl -X POST https://<codespace-name>-8000.app.github.dev/messages \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "method": "tools/call",
+    "params": {"name": "fibonacci", "arguments": {"n": 10}},
+    "id": 1
+  }'
+```
+
+#### Testing Production Endpoints
+
+```bash
+# Without authentication (should fail with 401)
+curl https://<codespace-name>-9000.app.github.dev/health
+
+# With authentication (should succeed)
+curl -H "Authorization: Bearer <your-api-key>" \
+  https://<codespace-name>-9000.app.github.dev/health
+
+# Test a tool with authentication
+curl -X POST https://<codespace-name>-9000.app.github.dev/messages \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <your-api-key>" \
+  -d '{
+    "jsonrpc": "2.0",
+    "method": "tools/call",
+    "params": {"name": "fibonacci", "arguments": {"n": 10}},
+    "id": 1
+  }'
+```
+
+#### Setting Up Production API Key
+
+For production use, set a secure API key in Codespaces Secrets:
+
+1. Go to your repository on GitHub
+2. Click **Settings** → **Secrets and variables** → **Codespaces**
+3. Click **New repository secret**
+4. Name: `MCP_API_KEY`
+5. Value: Your secure API key (minimum 16 characters)
+6. Click **Add secret**
+
+The production servers will automatically use this key when the Codespace starts.
+
+#### Benefits of Dual-Endpoint Architecture
+
+✅ **Side-by-side Testing**: Compare development and production behavior in the same environment  
+✅ **Authentication Demo**: Show real authentication flow without breaking dev workflow  
+✅ **Security Best Practices**: Private dev endpoints, public prod endpoints with auth  
+✅ **Flexible Access**: Use private endpoints for debugging, public for demos  
+✅ **Configuration Validation**: Test both `config.dev.yaml` and `config.prod.yaml`  
+✅ **Production Simulation**: Match production security posture in development  
+
+#### Accessing Private Endpoints
+
+Development endpoints (8000-8001) are private by default. To access them:
+
+**From Codespace Terminal**:
+```bash
+# Direct access from within the Codespace
+curl http://localhost:8000/health
+```
+
+**From Your Local Machine**:
+```bash
+# Forward port from Codespace to local machine
+gh codespace ports forward 8000:8000
+
+# Then access locally
+curl http://localhost:8000/health
+```
+
 ### Troubleshooting Codespaces
 
 **Port not forwarding**:

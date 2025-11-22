@@ -1,15 +1,25 @@
 {
   "name": "MCP Servers",
   "image": "mcr.microsoft.com/devcontainers/python:3.11",
-  "forwardPorts": [8000, 8001],
+  "forwardPorts": [8000, 8001, 9000, 9001],
   "portsAttributes": {
     "8000": {
-      "label": "Math Server",
+      "label": "Math Server (Dev - No Auth)",
+      "onAutoForward": "notify",
+      "visibility": "private"
+    },
+    "8001": {
+      "label": "Stats Server (Dev - No Auth)",
+      "onAutoForward": "notify",
+      "visibility": "private"
+    },
+    "9000": {
+      "label": "Math Server (Prod - Auth Required)",
       "onAutoForward": "notify",
       "visibility": "public"
     },
-    "8001": {
-      "label": "Stats Server",
+    "9001": {
+      "label": "Stats Server (Prod - Auth Required)",
       "onAutoForward": "notify",
       "visibility": "public"
     }
