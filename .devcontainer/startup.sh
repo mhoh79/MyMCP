@@ -64,10 +64,15 @@ echo ""
 echo "🔐 Starting PROD servers (authentication required)..."
 echo ""
 
-# Get API key from environment or use default for demo
-API_KEY="${MCP_API_KEY:-demo-api-key-for-testing-only}"
-if [ "$API_KEY" = "demo-api-key-for-testing-only" ]; then
-    echo "  ⚠️  Using demo API key. Set MCP_API_KEY in Codespaces Secrets for production."
+# Get API key from environment or generate a random one for demo
+if [ -z "$MCP_API_KEY" ]; then
+    # Generate a random API key for this session
+    API_KEY="demo-$(openssl rand -hex 16 2>/dev/null || cat /dev/urandom | tr -dc 'a-f0-9' | head -c 32)"
+    echo "  ⚠️  Generated temporary API key for this session."
+    echo "     For production, set MCP_API_KEY in Codespaces Secrets."
+else
+    API_KEY="$MCP_API_KEY"
+    echo "  ✅ Using API key from MCP_API_KEY environment variable."
 fi
 
 # Start Math Server (Prod - port 9000)
@@ -171,7 +176,7 @@ if [ -n "$CODESPACE_NAME" ]; then
     echo "   Math Server:  https://${CODESPACE_NAME}-9000.app.github.dev"
     echo "   Stats Server: https://${CODESPACE_NAME}-9001.app.github.dev"
     echo "   Visibility:   Public"
-    echo "   Auth Header:  Authorization: Bearer $API_KEY"
+    echo "   Auth Header:  Authorization: Bearer <api-key>"
     echo ""
     echo "🌐 Codespace Environment Detected"
 else
@@ -182,7 +187,7 @@ else
     echo "🔐 PROD Servers (Authentication Required):"
     echo "   Math Server:  http://localhost:9000"
     echo "   Stats Server: http://localhost:9001"
-    echo "   Auth Header:  Authorization: Bearer $API_KEY"
+    echo "   Auth Header:  Authorization: Bearer <api-key>"
     echo ""
     echo "ℹ️  Running in local environment (not Codespaces)"
 fi
@@ -208,10 +213,12 @@ echo "  tail -f /tmp/stats_server_prod.log"
 echo ""
 echo "Test authentication:"
 echo "  # Without auth (should fail on prod):"
-echo "  curl https://${CODESPACE_NAME:-localhost}-9000.app.github.dev/health"
+echo "  curl https://${CODESPACE_NAME:-localhost}-9000.app.github.dev/messages"
 echo ""
 echo "  # With auth (should succeed on prod):"
-echo "  curl -H \"Authorization: Bearer $API_KEY\" https://${CODESPACE_NAME:-localhost}-9000.app.github.dev/health"
+echo "  curl -H \"Authorization: Bearer \$MCP_API_KEY\" https://${CODESPACE_NAME:-localhost}-9000.app.github.dev/health"
+echo ""
+echo "  # Note: Use the API key from your environment variable or the one generated above"
 echo ""
 echo "✅ Startup complete!"
 echo "============================================"

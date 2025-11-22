@@ -22,10 +22,11 @@ server:
     - "https://*.app.github.dev"
 
 # Authentication Configuration (ENABLED for prod mode)
-# API key will be set via MCP_API_KEY environment variable from Codespaces Secrets
+# API key MUST be set via MCP_API_KEY environment variable from Codespaces Secrets
+# The value below is a placeholder and will be overridden by the environment variable
 authentication:
   enabled: true
-  api_key: "REPLACE-WITH-SECURE-KEY-FROM-ENVIRONMENT"
+  api_key: "${MCP_API_KEY}"
 
 # Rate Limiting Configuration (ENABLED for prod mode)
 rate_limiting:
