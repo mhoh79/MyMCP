@@ -1,0 +1,156 @@
+#!/bin/bash
+# Script to run HTTP client tests
+# Usage: ./run_http_tests.sh [options]
+
+set -e
+
+# Default values
+SERVER_URL="${MATH_SERVER_URL:-http://localhost:8000}"
+START_SERVER="${START_SERVER:-yes}"
+SERVER_PORT=8000
+CONFIG_FILE=""
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+
+# Parse command line arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --no-server)
+            START_SERVER="no"
+            shift
+            ;;
+        --url)
+            SERVER_URL="$2"
+            START_SERVER="no"
+            shift 2
+            ;;
+        --config)
+            CONFIG_FILE="$2"
+            shift 2
+            ;;
+        --port)
+            SERVER_PORT="$2"
+            shift 2
+            ;;
+        --help)
+            echo "Usage: ./run_http_tests.sh [options]"
+            echo ""
+            echo "Options:"
+            echo "  --no-server         Don't start the server (assume it's already running)"
+            echo "  --url URL           Use specific server URL (implies --no-server)"
+            echo "  --config FILE       Use specific config file for server"
+            echo "  --port PORT         Server port (default: 8000)"
+            echo "  --help              Show this help message"
+            echo ""
+            echo "Examples:"
+            echo "  ./run_http_tests.sh                    # Start server and run tests"
+            echo "  ./run_http_tests.sh --no-server        # Run tests against existing server"
+            echo "  ./run_http_tests.sh --port 9000        # Use port 9000"
+            echo "  ./run_http_tests.sh --url http://example.com:8000  # Test remote server"
+            exit 0
+            ;;
+        *)
+            echo -e "${RED}Unknown option: $1${NC}"
+            echo "Use --help for usage information"
+            exit 1
+            ;;
+    esac
+done
+
+# Function to check if server is running
+check_server() {
+    local url=$1
+    local max_attempts=30
+    local attempt=1
+    
+    echo -e "${YELLOW}Waiting for server at $url...${NC}"
+    
+    while [ $attempt -le $max_attempts ]; do
+        if curl -s "${url}/health" > /dev/null 2>&1; then
+            echo -e "${GREEN}✓ Server is ready!${NC}"
+            return 0
+        fi
+        
+        if [ $attempt -eq $max_attempts ]; then
+            echo -e "${RED}✗ Server failed to start within 30 seconds${NC}"
+            return 1
+        fi
+        
+        echo "Attempt $attempt/$max_attempts..."
+        sleep 1
+        ((attempt++))
+    done
+}
+
+# Function to cleanup on exit
+cleanup() {
+    if [ -n "$SERVER_PID" ] && [ "$START_SERVER" = "yes" ]; then
+        echo -e "\n${YELLOW}Stopping server (PID: $SERVER_PID)...${NC}"
+        kill $SERVER_PID 2>/dev/null || true
+        wait $SERVER_PID 2>/dev/null || true
+        echo -e "${GREEN}✓ Server stopped${NC}"
+    fi
+}
+
+# Register cleanup function
+trap cleanup EXIT INT TERM
+
+# Start server if needed
+if [ "$START_SERVER" = "yes" ]; then
+    echo -e "${GREEN}Starting MCP HTTP server...${NC}"
+    
+    CMD="python src/math_server/server.py --transport http --host 127.0.0.1 --port $SERVER_PORT"
+    
+    if [ -n "$CONFIG_FILE" ]; then
+        CMD="$CMD --config $CONFIG_FILE"
+        echo "Using config file: $CONFIG_FILE"
+    fi
+    
+    echo "Command: $CMD"
+    
+    # Start server in background
+    $CMD &
+    SERVER_PID=$!
+    echo "Server PID: $SERVER_PID"
+    
+    # Update server URL if using custom port
+    if [ $SERVER_PORT -ne 8000 ]; then
+        SERVER_URL="http://127.0.0.1:$SERVER_PORT"
+    else
+        SERVER_URL="http://127.0.0.1:8000"
+    fi
+    
+    # Wait for server to be ready
+    if ! check_server "$SERVER_URL"; then
+        echo -e "${RED}✗ Failed to start server${NC}"
+        exit 1
+    fi
+else
+    echo -e "${YELLOW}Using existing server at $SERVER_URL${NC}"
+    
+    # Verify server is accessible
+    if ! curl -s "${SERVER_URL}/health" > /dev/null 2>&1; then
+        echo -e "${RED}✗ Server at $SERVER_URL is not accessible${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}✓ Server is accessible${NC}"
+fi
+
+# Run tests
+echo -e "\n${GREEN}Running HTTP client tests...${NC}"
+echo "Server URL: $SERVER_URL"
+echo ""
+
+export MATH_SERVER_URL="$SERVER_URL"
+
+# Run pytest with various options
+if ! pytest tests/test_http_client.py -v --tb=short --strict-markers; then
+    echo -e "\n${RED}✗ Tests failed${NC}"
+    exit 1
+fi
+
+echo -e "\n${GREEN}✓ All tests passed!${NC}"

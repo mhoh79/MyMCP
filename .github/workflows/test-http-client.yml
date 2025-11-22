@@ -1,0 +1,252 @@
+name: Test HTTP Client
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'src/math_server/**'
+      - 'src/middleware.py'
+      - 'src/config.py'
+      - 'tests/test_http_client.py'
+      - 'requirements.txt'
+      - 'requirements-test.txt'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'src/math_server/**'
+      - 'src/middleware.py'
+      - 'src/config.py'
+      - 'tests/test_http_client.py'
+      - 'requirements.txt'
+      - 'requirements-test.txt'
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        python-version: ['3.11', '3.12']
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: 'pip'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-test.txt
+      
+      - name: Start MCP HTTP server
+        run: |
+          python src/math_server/server.py --transport http --host 127.0.0.1 --port 8000 &
+          SERVER_PID=$!
+          echo "SERVER_PID=$SERVER_PID" >> $GITHUB_ENV
+          
+          # Wait for server to be ready (max 30 seconds)
+          echo "Waiting for server to start..."
+          for i in {1..30}; do
+            if curl -s http://127.0.0.1:8000/health > /dev/null 2>&1; then
+              echo "Server is ready!"
+              break
+            fi
+            if [ $i -eq 30 ]; then
+              echo "Server failed to start within 30 seconds"
+              exit 1
+            fi
+            echo "Waiting... ($i/30)"
+            sleep 1
+          done
+      
+      - name: Run HTTP client tests
+        env:
+          MATH_SERVER_URL: http://127.0.0.1:8000
+        run: |
+          pytest tests/test_http_client.py -v --tb=short --strict-markers
+      
+      - name: Run tests with coverage
+        env:
+          MATH_SERVER_URL: http://127.0.0.1:8000
+        run: |
+          pip install pytest-cov
+          pytest tests/test_http_client.py --cov=tests --cov-report=xml --cov-report=term-missing
+      
+      - name: Upload coverage reports
+        uses: codecov/codecov-action@v4
+        with:
+          file: ./coverage.xml
+          flags: http-client-tests
+          name: codecov-http-client
+        if: matrix.python-version == '3.12'
+      
+      - name: Stop server
+        if: always()
+        run: |
+          if [ -n "$SERVER_PID" ]; then
+            kill $SERVER_PID || true
+          fi
+
+  test-with-auth:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-test.txt
+      
+      - name: Create config with authentication enabled
+        run: |
+          cat > config-test-auth.yaml << 'YAML'
+          server:
+            math:
+              host: "127.0.0.1"
+              port: 8000
+            stats:
+              host: "127.0.0.1"
+              port: 8001
+            cors_origins:
+              - "http://localhost:*"
+          
+          authentication:
+            enabled: true
+            api_key: "test-api-key-for-ci-12345678"
+          
+          rate_limiting:
+            enabled: false
+            requests_per_minute: 60
+          
+          logging:
+            level: "INFO"
+          YAML
+      
+      - name: Start MCP HTTP server with authentication
+        run: |
+          python src/math_server/server.py --transport http --host 127.0.0.1 --port 8000 --config config-test-auth.yaml &
+          SERVER_PID=$!
+          echo "SERVER_PID=$SERVER_PID" >> $GITHUB_ENV
+          
+          # Wait for server to be ready
+          echo "Waiting for server to start..."
+          for i in {1..30}; do
+            if curl -s http://127.0.0.1:8000/health > /dev/null 2>&1; then
+              echo "Server is ready!"
+              break
+            fi
+            if [ $i -eq 30 ]; then
+              echo "Server failed to start within 30 seconds"
+              exit 1
+            fi
+            sleep 1
+          done
+      
+      - name: Run authentication tests
+        env:
+          MATH_SERVER_URL: http://127.0.0.1:8000
+          MCP_API_KEY: test-api-key-for-ci-12345678
+        run: |
+          # Run only authentication-related tests
+          pytest tests/test_http_client.py -v -k "auth" --tb=short
+      
+      - name: Stop server
+        if: always()
+        run: |
+          if [ -n "$SERVER_PID" ]; then
+            kill $SERVER_PID || true
+          fi
+
+  test-with-rate-limit:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-test.txt
+      
+      - name: Create config with rate limiting enabled
+        run: |
+          cat > config-test-ratelimit.yaml << 'YAML'
+          server:
+            math:
+              host: "127.0.0.1"
+              port: 8000
+            stats:
+              host: "127.0.0.1"
+              port: 8001
+            cors_origins:
+              - "http://localhost:*"
+          
+          authentication:
+            enabled: false
+            api_key: "your-secret-api-key-here"
+          
+          rate_limiting:
+            enabled: true
+            requests_per_minute: 30
+          
+          logging:
+            level: "INFO"
+          YAML
+      
+      - name: Start MCP HTTP server with rate limiting
+        run: |
+          python src/math_server/server.py --transport http --host 127.0.0.1 --port 8000 --config config-test-ratelimit.yaml &
+          SERVER_PID=$!
+          echo "SERVER_PID=$SERVER_PID" >> $GITHUB_ENV
+          
+          # Wait for server to be ready
+          echo "Waiting for server to start..."
+          for i in {1..30}; do
+            if curl -s http://127.0.0.1:8000/health > /dev/null 2>&1; then
+              echo "Server is ready!"
+              break
+            fi
+            if [ $i -eq 30 ]; then
+              echo "Server failed to start within 30 seconds"
+              exit 1
+            fi
+            sleep 1
+          done
+      
+      - name: Run rate limiting tests
+        env:
+          MATH_SERVER_URL: http://127.0.0.1:8000
+        run: |
+          # Run rate limit tests
+          pytest tests/test_http_client.py -v -k "rate_limit" --tb=short
+      
+      - name: Stop server
+        if: always()
+        run: |
+          if [ -n "$SERVER_PID" ]; then
+            kill $SERVER_PID || true
+          fi
