@@ -12,6 +12,8 @@ import numpy as np
 from scipy import signal as scipy_signal
 from scipy.fft import fft, fftfreq
 from scipy import stats as scipy_stats
+from scipy.stats import t as t_dist
+from scipy.stats import chi2
 
 # MCP SDK imports for building the server
 from mcp.server import Server
@@ -36,6 +38,11 @@ logger = logging.getLogger("stats-server")
 NUMERICAL_TOLERANCE = 1e-10  # Tolerance for numerical comparisons and singularity checks
 MIN_CONFIDENCE_LEVEL = 0.8  # Minimum confidence level for statistical inference
 MAX_CONFIDENCE_LEVEL = 0.999  # Maximum confidence level for statistical inference
+
+# Constants for outlier detection algorithms
+EULER_MASCHERONI_CONSTANT = 0.5772156649  # Euler-Mascheroni constant for isolation forest
+EWMA_ALPHA = 0.3  # EWMA smoothing factor - balances responsiveness vs stability
+CUSUM_K_FACTOR = 0.5  # CUSUM allowance factor (fraction of std dev) - lower = more sensitive
 
 # SciPy imports for statistical tests
 try:
@@ -836,7 +843,6 @@ def grubbs_test(data: list[float], alpha: float = 0.05, method: str = "two_sided
     # Calculate critical value using t-distribution
     # Critical value: G_crit = ((n-1)/sqrt(n)) * sqrt(t^2 / (n-2+t^2))
     # where t is the critical value from t-distribution with n-2 degrees of freedom
-    from scipy.stats import t as t_dist
     
     # For two-sided test, use alpha/n for Bonferroni correction
     # For one-sided test, use alpha/n
@@ -1077,7 +1083,6 @@ def isolation_forest(data: list, contamination: float = 0.1, n_estimators: int =
     # Determine if data is univariate or multivariate
     if isinstance(data[0], (int, float)):
         # Univariate - convert to 2D
-        is_univariate = True
         X = [[val] for val in data]
         
         # Validate all elements are numeric
@@ -1086,7 +1091,6 @@ def isolation_forest(data: list, contamination: float = 0.1, n_estimators: int =
                 raise ValueError(f"All data values must be numeric. Item at index {i} is {type(value).__name__}: {value}")
     elif isinstance(data[0], list):
         # Multivariate
-        is_univariate = False
         X = data
         
         # Validate structure
@@ -1163,8 +1167,8 @@ def isolation_forest(data: list, contamination: float = 0.1, n_estimators: int =
         
         # Normalize path length to anomaly score
         # Shorter paths = higher anomaly score
-        # Use c(n) = 2H(n-1) - 2(n-1)/n where H is harmonic number
-        c_n = 2 * (np.log(subsample_size - 1) + 0.5772156649) - 2 * (subsample_size - 1) / subsample_size
+        # Use c(n) = 2H(n-1) - 2(n-1)/n where H is harmonic number (Euler-Mascheroni)
+        c_n = 2 * (np.log(subsample_size - 1) + EULER_MASCHERONI_CONSTANT) - 2 * (subsample_size - 1) / subsample_size
         anomaly_score = 2 ** (-avg_path_length / c_n)
         anomaly_scores.append(anomaly_score)
     
@@ -1302,7 +1306,6 @@ def mahalanobis_distance(data: list[list[float]], threshold: float = 0.975) -> d
     
     # Determine threshold using chi-square distribution
     # Mahalanobis distance squared follows chi-square distribution with k degrees of freedom
-    from scipy.stats import chi2
     threshold_distance = np.sqrt(chi2.ppf(threshold, n_features))
     
     # Identify outliers
@@ -1452,7 +1455,7 @@ def streaming_outlier_detection(current_value: float, historical_window: list[fl
     if method == "ewma":
         # Exponentially Weighted Moving Average
         # Give more weight to recent values
-        alpha = 0.3  # Smoothing factor
+        alpha = EWMA_ALPHA  # Smoothing factor (0.3 balances responsiveness vs stability)
         ewma = historical_window[0]
         for val in historical_window[1:]:
             ewma = alpha * val + (1 - alpha) * ewma
@@ -1473,7 +1476,7 @@ def streaming_outlier_detection(current_value: float, historical_window: list[fl
         # Cumulative Sum
         # Detect persistent shifts
         target = hist_mean
-        k = 0.5 * hist_std  # Allowance
+        k = CUSUM_K_FACTOR * hist_std  # Allowance (0.5*std - lower = more sensitive)
         h = threshold_sigma * hist_std  # Decision threshold
         
         # Calculate CUSUM
