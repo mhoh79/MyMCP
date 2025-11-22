@@ -13,6 +13,8 @@ venv/
 .github
 .vscode
 # Exclude top-level markdown files but keep src/ documentation
+# Note: Only files matching /*.md are excluded (top-level only)
+# Files in subdirectories like src/**/*.md are included by default
 /*.md
 .dockerignore
 Dockerfile
