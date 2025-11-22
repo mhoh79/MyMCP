@@ -161,7 +161,7 @@ start_servers() {
     print_info "Starting Math Server on port $MATH_PORT..."
     
     # Build command with optional --dev flag
-    MATH_CMD="python3 src/math_server/server.py --transport http --host 0.0.0.0 --port $MATH_PORT --config \"$CONFIG_FILE\""
+    MATH_CMD="python3 -m src.builtin.math_server.server --transport http --host 0.0.0.0 --port $MATH_PORT --config \"$CONFIG_FILE\""
     if [ "$DEV_MODE" = true ]; then
         MATH_CMD="$MATH_CMD --dev"
     fi
@@ -183,7 +183,7 @@ start_servers() {
     print_info "Starting Stats Server on port $STATS_PORT..."
     
     # Build command with optional --dev flag
-    STATS_CMD="python3 src/stats_server/server.py --transport http --host 0.0.0.0 --port $STATS_PORT --config \"$CONFIG_FILE\""
+    STATS_CMD="python3 -m src.builtin.stats_server.server --transport http --host 0.0.0.0 --port $STATS_PORT --config \"$CONFIG_FILE\""
     if [ "$DEV_MODE" = true ]; then
         STATS_CMD="$STATS_CMD --dev"
     fi

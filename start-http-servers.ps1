@@ -262,7 +262,7 @@ function Start-Servers {
     Write-Info "Starting Math Server on port $MathPort..."
     
     # Build argument list with optional --dev flag
-    $mathArgs = @("src/math_server/server.py", "--transport", "http", "--host", "0.0.0.0", "--port", $MathPort, "--config", $ConfigFile)
+    $mathArgs = @("-m", "src.builtin.math_server.server", "--transport", "http", "--host", "0.0.0.0", "--port", $MathPort, "--config", $ConfigFile)
     if ($DevMode) {
         $mathArgs += "--dev"
     }
@@ -298,7 +298,7 @@ function Start-Servers {
     Write-Info "Starting Stats Server on port $StatsPort..."
     
     # Build argument list with optional --dev flag
-    $statsArgs = @("src/stats_server/server.py", "--transport", "http", "--host", "0.0.0.0", "--port", $StatsPort, "--config", $ConfigFile)
+    $statsArgs = @("-m", "src.builtin.stats_server.server", "--transport", "http", "--host", "0.0.0.0", "--port", $StatsPort, "--config", $ConfigFile)
     if ($DevMode) {
         $statsArgs += "--dev"
     }
