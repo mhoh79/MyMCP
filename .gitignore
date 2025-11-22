@@ -78,3 +78,7 @@ htmlcov/
 src/custom/*
 !src/custom/__init__.py
 !src/custom/README.md
+
+# Custom server tests (user-created)
+tests/custom/*
+!tests/custom/__init__.py
