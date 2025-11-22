@@ -4165,8 +4165,8 @@ Development:     sk_mcp_dev_EXAMPLE_REPLACE_WITH_REAL_KEY
 Staging:         sk_mcp_stg_EXAMPLE_REPLACE_WITH_REAL_KEY
 Production:      sk_mcp_prod_EXAMPLE_REPLACE_WITH_REAL_KEY
 CI/CD:           sk_mcp_ci_EXAMPLE_REPLACE_WITH_REAL_KEY
-Client A:        sk_mcp_clienta_EXAMPLE_REPLACE_WITH_REAL
-Client B:        sk_mcp_clientb_EXAMPLE_REPLACE_WITH_REAL
+Client A:        sk_mcp_clienta_EXAMPLE_REPLACE_WITH_REAL_KEY
+Client B:        sk_mcp_clientb_EXAMPLE_REPLACE_WITH_REAL_KEY
 ```
 
 **Key Naming Convention:**
