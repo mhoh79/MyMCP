@@ -1,0 +1,69 @@
+# Define reusable configurations
+x-mcp-healthcheck: &mcp-healthcheck
+  # Note: $$ is Docker Compose variable escaping syntax
+  # It becomes $ in the actual container command
+  test: ["CMD-SHELL", "curl -f http://localhost:$$HEALTHCHECK_PORT/health || exit 1"]
+  interval: 30s
+  timeout: 5s
+  retries: 3
+  start_period: 10s
+
+x-mcp-environment: &mcp-environment
+  MCP_AUTH_ENABLED: true
+  MCP_API_KEY: ${MCP_API_KEY}
+  MCP_RATE_LIMIT_ENABLED: true
+
+services:
+  math-server:
+    build: .
+    container_name: mcp-math-server
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+    environment:
+      <<: *mcp-environment
+      HEALTHCHECK_PORT: 8000
+    command: python src/math_server/server.py --transport http --host 0.0.0.0 --port 8000 --config config.yaml
+    healthcheck:
+      <<: *mcp-healthcheck
+    restart: unless-stopped
+    networks:
+      - mcp-network
+
+  stats-server:
+    build: .
+    container_name: mcp-stats-server
+    ports:
+      - "8001:8001"
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+    environment:
+      <<: *mcp-environment
+      HEALTHCHECK_PORT: 8001
+    command: python src/stats_server/server.py --transport http --host 0.0.0.0 --port 8001 --config config.yaml
+    healthcheck:
+      <<: *mcp-healthcheck
+    restart: unless-stopped
+    networks:
+      - mcp-network
+
+  nginx:
+    image: nginx:alpine
+    container_name: mcp-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - math-server
+      - stats-server
+    restart: unless-stopped
+    networks:
+      - mcp-network
+
+networks:
+  mcp-network:
+    driver: bridge
