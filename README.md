@@ -590,6 +590,97 @@ To validate your configuration:
 python test_config.py
 ```
 
+## 🧪 HTTP Client Testing Suite
+
+The repository includes a comprehensive testing suite for validating HTTP transport, authentication, rate limiting, and all MCP tools over HTTP.
+
+### Features
+
+The test suite validates:
+- ✅ **SSE Connections**: Server-Sent Events endpoint connectivity
+- ✅ **MCP Protocol**: Initialization, tool listing, tool execution
+- ✅ **All Tools**: 16+ tool categories (Fibonacci, primes, number theory, hashing, dates, text processing, etc.)
+- ✅ **Authentication**: Valid/invalid/missing API keys, enabled/disabled states
+- ✅ **Rate Limiting**: Within/exceeding limits, disabled state
+- ✅ **CORS**: Header verification and preflight requests
+- ✅ **Health Endpoints**: `/health`, `/ready`, `/metrics`
+- ✅ **Error Handling**: Invalid JSON-RPC, unknown methods, malformed requests
+- ✅ **Concurrent Requests**: Multiple simultaneous requests
+- ✅ **Performance**: Response time validation
+
+### Quick Start
+
+```bash
+# Install test dependencies
+pip install -r requirements-test.txt
+
+# Run all tests (starts server automatically)
+./run_http_tests.sh
+
+# Or manually
+python src/math_server/server.py --transport http --port 8000 &
+pytest tests/test_http_client.py -v
+```
+
+### Running Tests
+
+**Against local server:**
+```bash
+./run_http_tests.sh
+```
+
+**Against existing server:**
+```bash
+./run_http_tests.sh --no-server
+```
+
+**Against GitHub Codespaces:**
+```bash
+export MATH_SERVER_URL="https://your-codespace-8000.app.github.dev"
+pytest tests/test_http_client.py -v
+```
+
+**Run specific test categories:**
+```bash
+# Tool execution tests only
+pytest tests/test_http_client.py -k "tool" -v
+
+# Authentication tests only
+pytest tests/test_http_client.py -k "auth" -v
+
+# Health endpoint tests only
+pytest tests/test_http_client.py -k "health" -v
+
+# Concurrent tests only
+pytest tests/test_http_client.py -k "concurrent" -v
+```
+
+### Test Results
+
+**Summary**: 40 passed, 4 skipped in ~1.7s
+
+- 40 tests validate core functionality
+- 4 tests skipped (require authentication or rate limiting enabled in config)
+- Full coverage of HTTP transport, SSE, JSON-RPC, and all MCP tools
+
+See [tests/README.md](tests/README.md) for comprehensive documentation including:
+- Detailed test categories
+- Configuration options
+- Troubleshooting guide
+- CI/CD integration examples
+
+### CI/CD Integration
+
+The repository includes GitHub Actions workflow for automated testing:
+
+```yaml
+# .github/workflows/test-http-client.yml
+- Runs tests against Python 3.11 and 3.12
+- Tests with authentication enabled
+- Tests with rate limiting enabled
+- Generates coverage reports
+```
+
 ## 🔥 Development Mode
 
 For faster iteration when developing or modifying server code, use the built-in hot-reload feature.
