@@ -22,10 +22,9 @@ docker-compose.yml
 .pids
 tests/
 *.log
-# Exclude development scripts
+# Exclude development scripts (not needed in container)
 *.ps1
 *.sh
-!start-http-servers.sh
 # Exclude example and test configs
 config.*.yaml
 !config.example.yaml

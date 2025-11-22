@@ -53,10 +53,17 @@ services:
   # Make sure your custom server is implemented in src/custom/ directory
   # and that your config.yaml includes the custom_servers configuration
   #
+  # Expected custom server structure:
+  #   src/custom/your_server_name/
+  #     __init__.py
+  #     server.py (main server implementation with __main__ or run function)
+  #     tools.py (optional - MCP tools implementation)
+  #
   # Steps to use:
   # 1. Replace 'your_server_name' with your actual server module name
   # 2. Update the port number (8002) to match your server configuration
   # 3. Ensure the module path matches your server location in src/custom/
+  # 4. Add the server to custom_servers in config.yaml
   #
   # custom-server-example:
   #   build: .
