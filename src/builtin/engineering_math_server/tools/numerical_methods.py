@@ -31,6 +31,10 @@ def root_finding(
     """
     Find roots using bisection, Newton-Raphson, secant, or Brent's method.
     
+    Note: This is a simplified implementation. The bisection method currently
+    uses sin(x) as a placeholder function for demonstration. In a full implementation,
+    this would accept function values or a function expression.
+    
     Args:
         method: Root finding method ('bisection', 'newton', 'secant', 'brent')
         a, b: Interval endpoints for bisection/brent
@@ -47,8 +51,9 @@ def root_finding(
         if a is None or b is None:
             raise ValueError("Bisection requires interval [a, b]")
         
-        # Simple bisection implementation
-        fa = np.sin(a)  # Placeholder function
+        # NOTE: Placeholder implementation using sin(x) for demonstration
+        # Full implementation would accept function expression or callable
+        fa = np.sin(a)
         fb = np.sin(b)
         
         if fa * fb > 0:
